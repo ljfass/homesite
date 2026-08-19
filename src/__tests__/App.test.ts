@@ -93,6 +93,33 @@ describe('App', () => {
     expect(wrapper.findAll('.chapter-label').every((label) => label.classes().includes('display-type'))).toBe(true)
     expect(wrapper.findAll('.terminal-command').every((command) => command.classes().includes('display-type'))).toBe(true)
   })
+
+  it('exposes scoped text-motion targets with stable accessible values', () => {
+    const wrapper = mount(App)
+    wrappers.push(wrapper)
+
+    const chapters = wrapper.findAll<HTMLElement>('[data-chapter]')
+    expect(chapters).toHaveLength(5)
+    expect(chapters.every((chapter) => chapter.findAll('[data-text-title]').length === 1)).toBe(true)
+    expect(chapters.every((chapter) => chapter.findAll('[data-text-label]').length === 1)).toBe(true)
+    expect(chapters.every((chapter) => chapter.findAll('[data-text-copy]').length === 1)).toBe(true)
+
+    const commands = wrapper.findAll<HTMLElement>('[data-text-command]')
+    expect(commands).toHaveLength(4)
+    expect(commands.map((command) => command.attributes('aria-label'))).toEqual([
+      homeContent.hero.command,
+      ...homeContent.story.map((item) => item.command),
+    ])
+
+    const labels = wrapper.findAll<HTMLElement>('[data-text-label]')
+    expect(labels.map((label) => label.attributes('aria-label'))).toEqual([
+      `${homeContent.hero.index} / ${homeContent.hero.eyebrow}`,
+      ...homeContent.story.map((item) => `${item.index} / ${item.eyebrow}`),
+      `${homeContent.ending.index} / ${homeContent.ending.eyebrow}`,
+    ])
+
+    expect(wrapper.findAll('[data-text-list]')).toHaveLength(2)
+  })
 })
 
 describe('SiteFooter', () => {

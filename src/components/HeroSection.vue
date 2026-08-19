@@ -20,14 +20,16 @@ defineProps<{
       fetchpriority="high"
     />
     <div class="hero__content">
-      <p class="chapter-label display-type">{{ hero.index }} / {{ hero.eyebrow }}</p>
-      <h1 id="entry-title" class="hero__title display-type">
-        <span v-for="(line, index) in hero.title" :key="line" data-hero-line>
+      <p class="chapter-label display-type" data-text-label :aria-label="`${hero.index} / ${hero.eyebrow}`">
+        {{ hero.index }} / {{ hero.eyebrow }}
+      </p>
+      <h1 id="entry-title" class="hero__title display-type" data-text-title>
+        <span v-for="(line, index) in hero.title" :key="line">
           {{ line }}{{ index < hero.title.length - 1 ? ' ' : '' }}
         </span>
       </h1>
-      <p class="hero__body" data-hero-copy>{{ hero.body }}</p>
-      <p class="terminal-command display-type" data-hero-copy>{{ hero.command }}</p>
+      <p class="hero__body" data-text-copy>{{ hero.body }}</p>
+      <p class="terminal-command display-type" data-text-command :aria-label="hero.command">{{ hero.command }}</p>
     </div>
   </section>
 </template>
