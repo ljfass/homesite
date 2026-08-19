@@ -14,8 +14,8 @@ defineProps<{
         {{ line }}{{ index < hero.title.length - 1 ? ' ' : '' }}
       </span>
     </h1>
-    <p>{{ hero.body }}</p>
-    <p>{{ hero.command }}</p>
+    <p data-hero-copy>{{ hero.body }}</p>
+    <p data-hero-copy>{{ hero.command }}</p>
     <div data-signal-visual aria-hidden="true" />
   </section>
 </template>
