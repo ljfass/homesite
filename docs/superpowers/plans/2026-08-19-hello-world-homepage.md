@@ -31,7 +31,7 @@
 - `src/lib/motion.ts`: pure motion-mode and horizontal-distance calculations.
 - `src/styles/tokens.css`: semantic color, spacing, typography and motion tokens.
 - `src/styles/global.css`: reset, layout, responsive and reduced-motion rules.
-- `src/assets/signal-field.webp`: original decorative raster artwork.
+- `src/assets/signal-field.webp`: licensed, attributed, cropped and edited decorative raster artwork.
 - `src/__tests__/content.test.ts`: typed content invariants.
 - `src/__tests__/App.test.ts`: semantic homepage and footer behavior.
 - `src/__tests__/motion.test.ts`: motion policy and distance unit tests.
@@ -575,15 +575,17 @@ git commit -m "feat: add responsive scrolltrigger motion"
 - Modify: `src/components/SiteHeader.vue`
 - Modify: `src/components/SiteFooter.vue`
 
-- [ ] **Step 1: Use the imagegen skill for the signal artwork**
+- [ ] **Step 1: Prepare the signal artwork**
 
-Generate a `2400×1600` abstract raster artwork with this exact direction:
+> Controlled substitution (2026-08-19): the built-in image generator was unavailable in the execution environment. A free-to-use Unsplash image by Logan Voss was used under the Unsplash License with attribution, then cropped, resized and edited to match the required signal-field direction.
+
+The selected source and local edit preserve this target direction:
 
 ```text
 Abstract digital signal field for a contemporary personal developer homepage. Near-black neutral green background, precise phosphor-green contour lines and sparse coral-orange pulses, visible scan texture, asymmetrical composition, crisp high-frequency detail, no text, no logos, no gradients or glowing bokeh, editorial and technical rather than sci-fi, enough negative space for oversized typography. Landscape 3:2.
 ```
 
-Save the optimized output as `src/assets/signal-field.webp` and keep it under 500 KB.
+Save the optimized 3:2 output as `src/assets/signal-field.webp` and keep it under 500 KB. Record the source, author, license and local edits in `src/assets/ATTRIBUTION.md`.
 
 - [ ] **Step 2: Add semantic design tokens**
 

@@ -17,12 +17,16 @@ body {
   overflow-x: clip;
   background: var(--color-ink);
   color: var(--color-text);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 1rem;
   line-height: 1.65;
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+.display-type {
+  font-family: var(--font-display);
 }
 
 button,
@@ -167,7 +171,7 @@ a[href] {
   display: block;
   width: 100%;
   height: 100%;
-  aspect-ratio: 1800 / 1013;
+  aspect-ratio: 3 / 2;
   object-fit: cover;
   object-position: center;
   filter: saturate(0.82) contrast(1.08);
@@ -419,12 +423,12 @@ a[href] {
   }
 
   .story-stage .story-panel {
-    width: 100vw;
+    width: min(82vw, 1080px);
     min-height: 100dvh;
-    flex: 0 0 100vw;
+    flex: 0 0 min(82vw, 1080px);
     padding-top: calc(var(--header-height) + var(--space-6));
     border-top: 0;
-    border-left: var(--border-thin) solid var(--color-line);
+    border-right: var(--border-thin) solid var(--color-line);
   }
 
   .story-panel__inner {
@@ -488,6 +492,32 @@ a[href] {
   }
 }
 
+@media (max-width: 767px), (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .story-stage {
+    height: auto;
+    overflow: visible;
+  }
+
+  .story-track {
+    display: block;
+    width: 100%;
+    height: auto;
+    transform: none !important;
+    will-change: auto;
+  }
+
+  .story-stage .story-panel {
+    width: 100%;
+    min-height: auto;
+    border-right: 0;
+    border-top: var(--border-thin) solid var(--color-line);
+  }
+}
+
 @media (max-width: 380px) {
   .site-header {
     gap: var(--space-2);
@@ -515,10 +545,6 @@ a[href] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
-
   *,
   *::before,
   *::after {
@@ -526,25 +552,5 @@ a[href] {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-  }
-
-  .story-stage {
-    height: auto;
-    overflow: visible;
-  }
-
-  .story-track {
-    display: block;
-    width: 100%;
-    height: auto;
-    transform: none !important;
-    will-change: auto;
-  }
-
-  .story-stage .story-panel {
-    width: 100%;
-    min-height: 88dvh;
-    border-left: 0;
-    border-top: var(--border-thin) solid var(--color-line);
   }
 }

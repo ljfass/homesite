@@ -65,8 +65,8 @@ describe('App', () => {
     const image = wrapper.get('img[data-signal-visual]')
     expect(image.attributes('src')).toMatch(/signal-field\.webp$/)
     expect(image.attributes('alt')).toBe('')
-    expect(image.attributes('width')).toBe('1800')
-    expect(image.attributes('height')).toBe('1013')
+    expect(image.attributes('width')).toBe('1200')
+    expect(image.attributes('height')).toBe('800')
     expect(image.attributes('decoding')).toBe('async')
     expect(image.attributes('fetchpriority')).toBe('high')
   })
@@ -81,6 +81,17 @@ describe('App', () => {
     expect(wrapper.get('[data-story-track]').classes()).toContain('story-track')
     expect(wrapper.findAll('[data-story-panel].story-panel')).toHaveLength(5)
     expect(wrapper.get('[role="progressbar"]').classes()).toContain('site-progress__track')
+  })
+
+  it('applies the display typeface contract to terminal and navigational elements', () => {
+    const wrapper = mount(App)
+    wrappers.push(wrapper)
+
+    expect(wrapper.get('[data-site-header]').classes()).toContain('display-type')
+    expect(wrapper.get('.hero__title').classes()).toContain('display-type')
+    expect(wrapper.findAll('.story-panel__title').every((title) => title.classes().includes('display-type'))).toBe(true)
+    expect(wrapper.findAll('.chapter-label').every((label) => label.classes().includes('display-type'))).toBe(true)
+    expect(wrapper.findAll('.terminal-command').every((command) => command.classes().includes('display-type'))).toBe(true)
   })
 })
 

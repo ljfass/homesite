@@ -11,7 +11,8 @@
   --color-line-light: #bdc7c0;
   --color-signal: #a7f3ad;
   --color-coral: #ff8060;
-  --font-mono: 'JetBrains Mono Variable', 'Noto Sans Mono CJK SC', 'Microsoft YaHei', monospace;
+  --font-display: 'JetBrains Mono Variable', 'PingFang SC', 'Microsoft YaHei', ui-monospace, monospace;
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
