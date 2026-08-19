@@ -128,13 +128,16 @@ test('desktop renders the hero and drives the horizontal story from scroll', asy
   expect(stageAtEntry!.y + stageAtEntry!.height).toBeGreaterThan(0)
   await expect(page.locator('.pin-spacer')).toHaveCount(1)
 
-  const scrollTarget = await stage.evaluate((storyStage) => {
+  const storyScroll = await stage.evaluate((storyStage) => {
     const track = storyStage.querySelector<HTMLElement>('[data-story-track]')
     const start = storyStage.getBoundingClientRect().top + window.scrollY
     const travel = Math.max(0, (track?.scrollWidth ?? 0) - storyStage.clientWidth)
-    return start + travel * 0.55
+    return {
+      middle: start + travel * 0.55,
+      end: start + travel,
+    }
   })
-  await page.evaluate((top) => window.scrollTo({ top, behavior: 'instant' }), scrollTarget)
+  await page.evaluate((top) => window.scrollTo({ top, behavior: 'instant' }), storyScroll.middle)
 
   const track = page.locator('[data-story-track]')
   await expect
@@ -154,6 +157,16 @@ test('desktop renders the hero and drives the horizontal story from scroll', asy
     .toBeGreaterThan(20)
   await expect(page.locator('.site-header__chapter')).not.toHaveText('00 / 04')
   await expectNoHorizontalOverflow(page)
+
+  await page.evaluate((top) => window.scrollTo({ top, behavior: 'instant' }), storyScroll.end)
+  await expect
+    .poll(() => progress.getAttribute('aria-valuenow').then((value) => Number(value)), { timeout: 8_000 })
+    .toBeGreaterThanOrEqual(99)
+  await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')
+
+  const ending = page.getByRole('heading', { level: 2, name: /To be\s+continued\./ })
+  await expect(ending).toBeVisible()
+  await expect(ending).toBeInViewport({ ratio: 0.2 })
   await expectBackToTop(page)
 })
 
