@@ -115,8 +115,10 @@ Components will add stable data attributes rather than animation code:
 - `data-text-label`
 - `data-text-copy`
 - `data-text-list`
+- `data-text-static="label"`
+- `data-text-static="command"`
 
-Command and label elements retain their final string in the rendered markup. Elements whose visible text is temporarily scrambled receive an `aria-label` containing the final value so assistive technology does not announce intermediate characters.
+Visible label and command targets are `aria-hidden="true"` spans whose final strings remain in rendered markup. Each has a screen-reader-only sibling carrying the same final value through `data-text-static="label"` or `data-text-static="command"`, so assistive technology never announces intermediate scrambled characters.
 
 ## Responsive Re-Splitting
 
@@ -130,7 +132,7 @@ If a chapter has already completed its sequence, a responsive re-split must leav
 
 - Preserve one semantic `h1` and the existing semantic `h2` chapter headings.
 - Use SplitText's accessible text behavior for headings.
-- Keep stable final-value `aria-label` attributes on scrambled commands and chapter labels.
+- Keep stable screen-reader-only final-text siblings beside scrambled visual labels and commands.
 - Never scramble links, buttons, body copy, or interactive labels.
 - Do not move keyboard focus or block scrolling during a text sequence.
 - Reduced-motion users receive final content without transitional hidden states.
@@ -149,7 +151,7 @@ If a chapter has already completed its sequence, a responsive re-split must leav
 ### Unit and Component Tests
 
 - Both new plugins are registered through the shared GSAP module.
-- Components expose the required data attributes and final `aria-label` values.
+- Components expose the required data attributes, `aria-hidden` visual targets, and stable final-text siblings.
 - `playChapter()` creates or starts a chapter sequence at most once.
 - Missing optional targets do not throw.
 - Cleanup kills timelines and reverts every SplitText instance.

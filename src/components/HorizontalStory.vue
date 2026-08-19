@@ -19,8 +19,9 @@ defineProps<{
         aria-labelledby="ending-title"
       >
         <div class="story-panel__inner">
-          <p class="chapter-label display-type" data-text-label :aria-label="`${ending.index} / ${ending.eyebrow}`">
-            {{ ending.index }} / {{ ending.eyebrow }}
+          <p class="chapter-label display-type">
+            <span data-text-label aria-hidden="true">{{ ending.index }} / {{ ending.eyebrow }}</span>
+            <span class="sr-only" data-text-static="label">{{ ending.index }} / {{ ending.eyebrow }}</span>
           </p>
           <h2 id="ending-title" class="story-panel__title display-type" data-text-title>
             <span v-for="(line, index) in ending.title" :key="line">

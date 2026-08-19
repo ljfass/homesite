@@ -18,11 +18,11 @@
 - Modify: `src/components/StoryPanel.vue` - expose reusable chapter text targets and stable accessible values.
 - Modify: `src/components/HorizontalStory.vue` - expose ending text targets.
 - Modify: `src/composables/useHomeMotion.ts` - connect text playback to existing desktop and compact chapter transitions.
-- Modify: `src/styles/global.css` - declare the SplitText line-mask contract without changing page layout.
+- Modify: `src/styles/global.css` - declare the SplitText line-mask and reusable screen-reader-only contracts without changing page layout.
 - Create: `src/__tests__/gsap.test.ts` - protect the shared plugin registration boundary.
 - Create: `src/__tests__/textMotion.test.ts` - verify sequence construction, one-shot behavior, re-splitting, missing targets, and cleanup.
 - Modify: `src/__tests__/App.test.ts` - verify component target and accessibility contracts.
-- Modify: `src/__tests__/styles.test.ts` - verify the line-mask and reduced-motion CSS contracts.
+- Modify: `src/__tests__/styles.test.ts` - verify the line-mask, screen-reader-only, and reduced-motion CSS contracts.
 - Modify: `src/__tests__/useHomeMotion.test.ts` - verify orchestration and reduced-motion bypass.
 - Modify: `tests/e2e/home.spec.ts` - verify final text, no replay, fallbacks, and absence of runtime/layout regressions.
 
@@ -124,9 +124,11 @@ git commit -m "feat: register GSAP text plugins"
 
 **Files:**
 - Modify: `src/__tests__/App.test.ts`
+- Modify: `src/__tests__/styles.test.ts`
 - Modify: `src/components/HeroSection.vue`
 - Modify: `src/components/StoryPanel.vue`
 - Modify: `src/components/HorizontalStory.vue`
+- Modify: `src/styles/global.css`
 
 - [ ] **Step 1: Write the failing component contract test**
 
@@ -145,43 +147,65 @@ it('exposes scoped text-motion targets with stable accessible values', () => {
 
   const commands = wrapper.findAll<HTMLElement>('[data-text-command]')
   expect(commands).toHaveLength(4)
-  expect(commands.map((command) => command.attributes('aria-label'))).toEqual([
+  expect(commands.every((command) => command.attributes('aria-hidden') === 'true')).toBe(true)
+  expect(commands.every((command) => command.attributes('aria-label') === undefined)).toBe(true)
+
+  const staticCommands = wrapper.findAll<HTMLElement>('[data-text-static="command"]')
+  expect(staticCommands.map((command) => command.text())).toEqual([
     homeContent.hero.command,
     ...homeContent.story.map((item) => item.command),
   ])
 
   const labels = wrapper.findAll<HTMLElement>('[data-text-label]')
-  expect(labels.map((label) => label.attributes('aria-label'))).toEqual([
+  expect(labels.every((label) => label.attributes('aria-hidden') === 'true')).toBe(true)
+  expect(labels.every((label) => label.attributes('aria-label') === undefined)).toBe(true)
+
+  const staticLabels = wrapper.findAll<HTMLElement>('[data-text-static="label"]')
+  expect(staticLabels.map((label) => label.text())).toEqual([
     `${homeContent.hero.index} / ${homeContent.hero.eyebrow}`,
     ...homeContent.story.map((item) => `${item.index} / ${item.eyebrow}`),
     `${homeContent.ending.index} / ${homeContent.ending.eyebrow}`,
   ])
 
+  expect(wrapper.findAll('.chapter-label').every((label) => label.attributes('aria-label') === undefined)).toBe(true)
+  expect(wrapper.findAll('.terminal-command').every((command) => command.attributes('aria-label') === undefined)).toBe(true)
   expect(wrapper.findAll('[data-text-list]')).toHaveLength(2)
+  expect(wrapper.get('[data-chapter="02"]').findAll('[data-text-list]')).toHaveLength(1)
+  expect(wrapper.get('[data-chapter="03"]').findAll('[data-text-list]')).toHaveLength(1)
+  expect(wrapper.get('[data-chapter="00"]').findAll('[data-text-list]')).toHaveLength(0)
+  expect(wrapper.get('[data-chapter="01"]').findAll('[data-text-list]')).toHaveLength(0)
+  expect(wrapper.get('[data-chapter="04"]').findAll('[data-text-list]')).toHaveLength(0)
 })
 ```
 
-- [ ] **Step 2: Run the component test and verify red**
+Also add this contract in `src/__tests__/styles.test.ts`:
+
+```ts
+it('provides a reusable visually hidden text utility', () => {
+  expect(globalStyles).toMatch(
+    /\.sr-only\s*{[^}]*position: absolute;[^}]*width: 1px;[^}]*height: 1px;[^}]*padding: 0;[^}]*margin: -1px;[^}]*overflow: hidden;[^}]*clip: rect\(0, 0, 0, 0\);[^}]*clip-path: inset\(50%\);[^}]*white-space: nowrap;[^}]*border: 0;/s,
+  )
+})
+```
+
+- [ ] **Step 2: Run the component and CSS tests and verify red**
 
 Run:
 
 ```bash
-npm test -- src/__tests__/App.test.ts
+npm test -- src/__tests__/App.test.ts src/__tests__/styles.test.ts
 ```
 
-Expected: FAIL because the `data-text-*` and final `aria-label` attributes do not exist.
+Expected: FAIL because the `aria-hidden` visual targets, stable final-text sibling nodes, and `.sr-only` utility do not exist.
 
 - [ ] **Step 3: Add hero contracts without adding component animation code**
 
 Update the relevant nodes in `src/components/HeroSection.vue`:
 
 ```vue
-<p
-  class="chapter-label display-type"
-  data-text-label
-  :aria-label="`${hero.index} / ${hero.eyebrow}`"
->
-  {{ hero.index }} / {{ hero.eyebrow }}
+<p class="chapter-label display-type">
+  <span data-text-label aria-hidden="true">{{ hero.index }} / {{ hero.eyebrow }}</span>
+  <span class="sr-only" data-text-static="label">{{ hero.index }} / {{ hero.eyebrow }}</span>
 </p>
 <h1 id="entry-title" class="hero__title display-type" data-text-title>
   <span v-for="(line, index) in hero.title" :key="line">
@@ -189,12 +213,9 @@ Update the relevant nodes in `src/components/HeroSection.vue`:
   </span>
 </h1>
 <p class="hero__body" data-text-copy>{{ hero.body }}</p>
-<p
-  class="terminal-command display-type"
-  data-text-command
-  :aria-label="hero.command"
->
-  {{ hero.command }}
+<p class="terminal-command display-type">
+  <span data-text-command aria-hidden="true">{{ hero.command }}</span>
+  <span class="sr-only" data-text-static="command">{{ hero.command }}</span>
 </p>
 ```
 
@@ -205,12 +226,9 @@ Remove the superseded `data-hero-line` and `data-hero-copy` attributes; their an
 Update the corresponding nodes in `src/components/StoryPanel.vue`:
 
 ```vue
-<p
-  class="chapter-label display-type"
-  data-text-label
-  :aria-label="`${item.index} / ${item.eyebrow}`"
->
-  {{ item.index }} / {{ item.eyebrow }}
+<p class="chapter-label display-type">
+  <span data-text-label aria-hidden="true">{{ item.index }} / {{ item.eyebrow }}</span>
+  <span class="sr-only" data-text-static="label">{{ item.index }} / {{ item.eyebrow }}</span>
 </p>
 <h2 :id="`${item.id}-title`" class="story-panel__title display-type" data-text-title>
   <span v-for="(line, index) in item.title" :key="line">
@@ -218,12 +236,9 @@ Update the corresponding nodes in `src/components/StoryPanel.vue`:
   </span>
 </h2>
 <p class="story-panel__body" data-text-copy>{{ item.body }}</p>
-<p
-  class="terminal-command display-type"
-  data-text-command
-  :aria-label="item.command"
->
-  {{ item.command }}
+<p class="terminal-command display-type">
+  <span data-text-command aria-hidden="true">{{ item.command }}</span>
+  <span class="sr-only" data-text-static="command">{{ item.command }}</span>
 </p>
 <ul v-if="item.items?.length" class="status-list" data-text-list>
 ```
@@ -233,12 +248,9 @@ Update the corresponding nodes in `src/components/StoryPanel.vue`:
 Update the ending content in `src/components/HorizontalStory.vue`:
 
 ```vue
-<p
-  class="chapter-label display-type"
-  data-text-label
-  :aria-label="`${ending.index} / ${ending.eyebrow}`"
->
-  {{ ending.index }} / {{ ending.eyebrow }}
+<p class="chapter-label display-type">
+  <span data-text-label aria-hidden="true">{{ ending.index }} / {{ ending.eyebrow }}</span>
+  <span class="sr-only" data-text-static="label">{{ ending.index }} / {{ ending.eyebrow }}</span>
 </p>
 <h2 id="ending-title" class="story-panel__title display-type" data-text-title>
   <span v-for="(line, index) in ending.title" :key="line">
@@ -248,19 +260,39 @@ Update the ending content in `src/components/HorizontalStory.vue`:
 <p class="story-panel__body" data-text-copy>{{ ending.body }}</p>
 ```
 
-- [ ] **Step 6: Verify and commit the component contracts**
+- [ ] **Step 6: Add the reusable screen-reader-only utility**
+
+Add this rule in `src/styles/global.css`:
+
+```css
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+```
+
+- [ ] **Step 7: Verify and commit the component contracts**
 
 Run:
 
 ```bash
-npm test -- src/__tests__/App.test.ts
+npm test -- src/__tests__/App.test.ts src/__tests__/styles.test.ts
+npx vue-tsc --noEmit -p tsconfig.app.json
 ```
 
-Expected: all App/component tests pass, including exact final command and label values.
+Expected: all focused tests pass, including exact final command and label values, and Vue/TypeScript exits with code 0.
 
 ```bash
-git add src/components/HeroSection.vue src/components/StoryPanel.vue src/components/HorizontalStory.vue src/__tests__/App.test.ts
-git commit -m "feat: expose text motion targets"
+git add src/components/HeroSection.vue src/components/StoryPanel.vue src/components/HorizontalStory.vue src/styles/global.css src/__tests__/App.test.ts src/__tests__/styles.test.ts
+git commit -m "fix: preserve accessible text during decoding"
 ```
 
 ### Task 3: Build the One-Shot Text Motion Controller
@@ -319,10 +351,10 @@ function makeChapter(chapter = '01', options: { title?: boolean; command?: boole
   const section = document.createElement('section')
   section.dataset.chapter = chapter
   section.innerHTML = `
-    <p data-text-label aria-label="${chapter} / LABEL">${chapter} / LABEL</p>
+    <p><span data-text-label aria-hidden="true">${chapter} / LABEL</span><span class="sr-only" data-text-static="label">${chapter} / LABEL</span></p>
     ${options.title === false ? '' : '<h2 data-text-title>Chapter title</h2>'}
     <p data-text-copy>Body copy</p>
-    ${options.command === false ? '' : '<p data-text-command aria-label="$ command">$ command</p>'}
+    ${options.command === false ? '' : '<p><span data-text-command aria-hidden="true">$ command</span><span class="sr-only" data-text-static="command">$ command</span></p>'}
     <ul data-text-list><li>Status</li></ul>
   `
   return section
@@ -894,11 +926,13 @@ Add below `openHomepage` in `tests/e2e/home.spec.ts`:
 async function expectTextMotionSettled(page: Page, chapter: string): Promise<void> {
   const section = page.locator(`[data-chapter="${chapter}"]`)
   const label = section.locator('[data-text-label]')
-  await expect(label).toHaveText((await label.getAttribute('aria-label')) ?? '')
+  const staticLabel = section.locator('[data-text-static="label"]')
+  await expect(label).toHaveText((await staticLabel.textContent()) ?? '')
 
   const command = section.locator('[data-text-command]')
   if ((await command.count()) > 0) {
-    await expect(command).toHaveText((await command.getAttribute('aria-label')) ?? '', { timeout: 8_000 })
+    const staticCommand = section.locator('[data-text-static="command"]')
+    await expect(command).toHaveText((await staticCommand.textContent()) ?? '', { timeout: 8_000 })
   }
 }
 ```
@@ -1047,7 +1081,7 @@ Confirm all of the following before integration:
 
 - every chapter plays at most once;
 - only headings, labels, commands, body copy, and list entries use the approved effects;
-- commands and labels keep stable final `aria-label` values;
+- commands and labels retain stable screen-reader-only final-text siblings;
 - reduced motion never constructs the text controller;
 - SplitText cleanup restores the original semantic headings;
 - the existing horizontal travel and compact breakpoints are unchanged;

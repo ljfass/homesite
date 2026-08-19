@@ -15,8 +15,9 @@ defineProps<{
     :aria-labelledby="`${item.id}-title`"
   >
     <div class="story-panel__inner">
-      <p class="chapter-label display-type" data-text-label :aria-label="`${item.index} / ${item.eyebrow}`">
-        {{ item.index }} / {{ item.eyebrow }}
+      <p class="chapter-label display-type">
+        <span data-text-label aria-hidden="true">{{ item.index }} / {{ item.eyebrow }}</span>
+        <span class="sr-only" data-text-static="label">{{ item.index }} / {{ item.eyebrow }}</span>
       </p>
       <h2 :id="`${item.id}-title`" class="story-panel__title display-type" data-text-title>
         <span v-for="(line, index) in item.title" :key="line">
@@ -24,7 +25,10 @@ defineProps<{
         </span>
       </h2>
       <p class="story-panel__body" data-text-copy>{{ item.body }}</p>
-      <p class="terminal-command display-type" data-text-command :aria-label="item.command">{{ item.command }}</p>
+      <p class="terminal-command display-type">
+        <span data-text-command aria-hidden="true">{{ item.command }}</span>
+        <span class="sr-only" data-text-static="command">{{ item.command }}</span>
+      </p>
       <ul v-if="item.items?.length" class="status-list" data-text-list>
         <li v-for="entry in item.items" :key="entry.label">
           <span>{{ entry.label }}</span>

@@ -106,19 +106,34 @@ describe('App', () => {
 
     const commands = wrapper.findAll<HTMLElement>('[data-text-command]')
     expect(commands).toHaveLength(4)
-    expect(commands.map((command) => command.attributes('aria-label'))).toEqual([
+    expect(commands.every((command) => command.attributes('aria-hidden') === 'true')).toBe(true)
+    expect(commands.every((command) => command.attributes('aria-label') === undefined)).toBe(true)
+
+    const staticCommands = wrapper.findAll<HTMLElement>('[data-text-static="command"]')
+    expect(staticCommands.map((command) => command.text())).toEqual([
       homeContent.hero.command,
       ...homeContent.story.map((item) => item.command),
     ])
 
     const labels = wrapper.findAll<HTMLElement>('[data-text-label]')
-    expect(labels.map((label) => label.attributes('aria-label'))).toEqual([
+    expect(labels.every((label) => label.attributes('aria-hidden') === 'true')).toBe(true)
+    expect(labels.every((label) => label.attributes('aria-label') === undefined)).toBe(true)
+
+    const staticLabels = wrapper.findAll<HTMLElement>('[data-text-static="label"]')
+    expect(staticLabels.map((label) => label.text())).toEqual([
       `${homeContent.hero.index} / ${homeContent.hero.eyebrow}`,
       ...homeContent.story.map((item) => `${item.index} / ${item.eyebrow}`),
       `${homeContent.ending.index} / ${homeContent.ending.eyebrow}`,
     ])
 
+    expect(wrapper.findAll('.chapter-label').every((label) => label.attributes('aria-label') === undefined)).toBe(true)
+    expect(wrapper.findAll('.terminal-command').every((command) => command.attributes('aria-label') === undefined)).toBe(true)
     expect(wrapper.findAll('[data-text-list]')).toHaveLength(2)
+    expect(wrapper.get('[data-chapter="02"]').findAll('[data-text-list]')).toHaveLength(1)
+    expect(wrapper.get('[data-chapter="03"]').findAll('[data-text-list]')).toHaveLength(1)
+    expect(wrapper.get('[data-chapter="00"]').findAll('[data-text-list]')).toHaveLength(0)
+    expect(wrapper.get('[data-chapter="01"]').findAll('[data-text-list]')).toHaveLength(0)
+    expect(wrapper.get('[data-chapter="04"]').findAll('[data-text-list]')).toHaveLength(0)
   })
 })
 

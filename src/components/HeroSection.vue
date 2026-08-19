@@ -20,8 +20,9 @@ defineProps<{
       fetchpriority="high"
     />
     <div class="hero__content">
-      <p class="chapter-label display-type" data-text-label :aria-label="`${hero.index} / ${hero.eyebrow}`">
-        {{ hero.index }} / {{ hero.eyebrow }}
+      <p class="chapter-label display-type">
+        <span data-text-label aria-hidden="true">{{ hero.index }} / {{ hero.eyebrow }}</span>
+        <span class="sr-only" data-text-static="label">{{ hero.index }} / {{ hero.eyebrow }}</span>
       </p>
       <h1 id="entry-title" class="hero__title display-type" data-text-title>
         <span v-for="(line, index) in hero.title" :key="line">
@@ -29,7 +30,10 @@ defineProps<{
         </span>
       </h1>
       <p class="hero__body" data-text-copy>{{ hero.body }}</p>
-      <p class="terminal-command display-type" data-text-command :aria-label="hero.command">{{ hero.command }}</p>
+      <p class="terminal-command display-type">
+        <span data-text-command aria-hidden="true">{{ hero.command }}</span>
+        <span class="sr-only" data-text-static="command">{{ hero.command }}</span>
+      </p>
     </div>
   </section>
 </template>

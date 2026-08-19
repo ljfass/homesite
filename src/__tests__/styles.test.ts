@@ -34,6 +34,12 @@ describe('homepage visual system', () => {
     expect(globalStyles).toMatch(/\.display-type\s*{[^}]*font-family: var\(--font-display\);/s)
   })
 
+  it('provides a reusable visually hidden text utility', () => {
+    expect(globalStyles).toMatch(
+      /\.sr-only\s*{[^}]*position: absolute;[^}]*width: 1px;[^}]*height: 1px;[^}]*padding: 0;[^}]*margin: -1px;[^}]*overflow: hidden;[^}]*clip: rect\(0, 0, 0, 0\);[^}]*clip-path: inset\(50%\);[^}]*white-space: nowrap;[^}]*border: 0;/s,
+    )
+  })
+
   it('keeps desktop story chapters narrower than the viewport', () => {
     expect(globalStyles).toContain('width: min(82vw, 1080px);')
     expect(globalStyles).toContain('flex: 0 0 min(82vw, 1080px);')
