@@ -1,11 +1,36 @@
 export type StoryItem = {
-  id: 'about' | 'now' | 'principles'
-  index: '01' | '02' | '03'
-  eyebrow: string
-  title: string[]
-  body: string
-  command: string
-  items?: Array<{ label: string; value?: string }>
+  readonly id: 'about' | 'now' | 'principles'
+  readonly index: '01' | '02' | '03'
+  readonly eyebrow: string
+  readonly title: readonly string[]
+  readonly body: string
+  readonly command: string
+  readonly items?: readonly {
+    readonly label: string
+    readonly value?: string
+  }[]
+}
+
+export type SiteContent = {
+  readonly domain: string
+  readonly title: string
+  readonly description: string
+  readonly icpNumber: string | null
+}
+
+export type HeroContent = {
+  readonly index: '00'
+  readonly eyebrow: string
+  readonly title: readonly string[]
+  readonly body: string
+  readonly command: string
+}
+
+export type EndingContent = {
+  readonly index: '04'
+  readonly eyebrow: string
+  readonly title: readonly string[]
+  readonly body: string
 }
 
 export const homeContent = {
@@ -14,14 +39,14 @@ export const homeContent = {
     title: 'Hello World',
     description: '一个尚未被定义、持续生长的个人主页',
     icpNumber: null as string | null,
-  },
+  } satisfies SiteContent,
   hero: {
     index: '00',
     eyebrow: 'ENTRY',
     title: ['Hello', 'World'],
     body: '一个还没有被定义的个人主页。先在互联网留下一处坐标，其他的以后慢慢发生。',
     command: '$ scroll_to_begin',
-  },
+  } satisfies HeroContent,
   story: [
     {
       id: 'about',
@@ -57,11 +82,11 @@ export const homeContent = {
         { label: '留点空白' },
       ],
     },
-  ] satisfies StoryItem[],
+  ] satisfies readonly StoryItem[],
   ending: {
     index: '04',
     eyebrow: 'END',
     title: ['To be', 'continued.'],
     body: '这里不是结尾，只是本次滚动的终点。',
-  },
+  } satisfies EndingContent,
 } as const

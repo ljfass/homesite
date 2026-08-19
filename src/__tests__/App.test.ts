@@ -3,6 +3,8 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import App from '../App.vue'
 import HorizontalStory from '../components/HorizontalStory.vue'
 import SiteFooter from '../components/SiteFooter.vue'
+import SiteHeader from '../components/SiteHeader.vue'
+import StoryPanel from '../components/StoryPanel.vue'
 import { homeContent } from '../content/home'
 
 const wrappers: VueWrapper[] = []
@@ -48,7 +50,7 @@ describe('App', () => {
       '04',
     ])
     expect(wrapper.get('#ending-title').text().replace(/\s+/g, ' ')).toBe('To be continued.')
-    expect(wrapper.get('a[href="#main-content"]').text()).toBe('跳到主要内容')
+    expect(wrapper.get('a.skip-link[href="#main-content"]').text()).toBe('跳到主要内容')
     expect(wrapper.find('header').exists()).toBe(true)
     expect(wrapper.find('main#main-content').exists()).toBe(true)
     expect(wrapper.find('footer').exists()).toBe(true)
@@ -87,6 +89,47 @@ describe('SiteFooter', () => {
     await wrapper.get('[data-back-to-top]').trigger('click')
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+  })
+
+  it('scrolls instantly to the top when reduced motion is preferred', async () => {
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList)
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    const wrapper = mount(SiteFooter, { props: { site: homeContent.site } })
+    wrappers.push(wrapper)
+
+    await wrapper.get('[data-back-to-top]').trigger('click')
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' })
+  })
+
+  it('renders a copyright line with the current year and site domain', () => {
+    const wrapper = mount(SiteFooter, { props: { site: homeContent.site } })
+    wrappers.push(wrapper)
+
+    expect(wrapper.text()).toContain(`© ${new Date().getFullYear()} ${homeContent.site.domain}`)
+  })
+})
+
+describe('SiteHeader', () => {
+  it('clamps progressbar values to the supported range', () => {
+    const belowRange = mount(SiteHeader, { props: { domain: 'example.cn', progress: -0.25, chapter: '00' } })
+    const aboveRange = mount(SiteHeader, { props: { domain: 'example.cn', progress: 2, chapter: '04' } })
+    wrappers.push(belowRange, aboveRange)
+
+    expect(belowRange.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('0')
+    expect(aboveRange.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('100')
+  })
+})
+
+describe('StoryPanel', () => {
+  it('renders PRINCIPLES items as a semantic unordered list', () => {
+    const wrapper = mount(StoryPanel, { props: { item: homeContent.story[2] } })
+    wrappers.push(wrapper)
+
+    expect(wrapper.find('ul').exists()).toBe(true)
+    expect(wrapper.findAll('ul > li')).toHaveLength(3)
+    expect(wrapper.find('dt').exists()).toBe(false)
+    expect(wrapper.find('dd').exists()).toBe(false)
   })
 })
 

@@ -16,11 +16,11 @@ defineProps<{
     </h2>
     <p>{{ item.body }}</p>
     <p>{{ item.command }}</p>
-    <dl v-if="item.items?.length">
-      <template v-for="entry in item.items" :key="entry.label">
-        <dt>{{ entry.label }}</dt>
-        <dd v-if="entry.value">{{ entry.value }}</dd>
-      </template>
-    </dl>
+    <ul v-if="item.items?.length">
+      <li v-for="entry in item.items" :key="entry.label">
+        <span>{{ entry.label }}</span>
+        <span v-if="entry.value">{{ entry.value }}</span>
+      </li>
+    </ul>
   </section>
 </template>

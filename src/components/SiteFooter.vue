@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ArrowUp } from 'lucide-vue-next'
+import type { SiteContent } from '../content/home'
 
 defineProps<{
-  site: {
-    domain: string
-    title: string
-    icpNumber: string | null
-  }
+  site: SiteContent
 }>()
+
+const currentYear = new Date().getFullYear()
 
 function backToTop() {
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -19,6 +18,7 @@ function backToTop() {
   <footer data-site-footer>
     <p>{{ site.domain }}</p>
     <p>{{ site.title }}</p>
+    <p>© {{ currentYear }} {{ site.domain }}</p>
     <a
       v-if="site.icpNumber"
       href="https://beian.miit.gov.cn/"

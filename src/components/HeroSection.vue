@@ -1,11 +1,5 @@
 <script setup lang="ts">
-type HeroContent = {
-  index: string
-  eyebrow: string
-  title: readonly string[]
-  body: string
-  command: string
-}
+import type { HeroContent } from '../content/home'
 
 defineProps<{
   hero: HeroContent

@@ -1,17 +1,10 @@
 <script setup lang="ts">
-import type { StoryItem } from '../content/home'
+import type { EndingContent, StoryItem } from '../content/home'
 import StoryPanel from './StoryPanel.vue'
-
-type Ending = {
-  index: string
-  eyebrow: string
-  title: readonly string[]
-  body: string
-}
 
 defineProps<{
   items: readonly StoryItem[]
-  ending: Ending
+  ending: EndingContent
 }>()
 </script>
 

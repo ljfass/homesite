@@ -7,7 +7,7 @@ describe('home content', () => {
   })
 
   it('uses unique story IDs', () => {
-    expect(new Set(homeContent.story.map((story) => story.id)).size).toBe(3)
+    expect(new Set(homeContent.story.map((story) => story.id)).size).toBe(homeContent.story.length)
   })
 
   it('does not define an ICP number', () => {

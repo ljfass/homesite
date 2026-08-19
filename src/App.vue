@@ -17,7 +17,7 @@ if (description) {
 </script>
 
 <template>
-  <a href="#main-content">跳到主要内容</a>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
   <SiteHeader :domain="homeContent.site.domain" :progress="progress" :chapter="chapter" />
   <main id="main-content">
     <HeroSection :hero="homeContent.hero" />
