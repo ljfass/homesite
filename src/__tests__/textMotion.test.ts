@@ -318,17 +318,21 @@ describe('createTextMotion', () => {
   })
 
   it('keeps completed chapters at progress one after an automatic resplit', () => {
-    createTextMotion(mountMarkup(chapter('01')))
+    const controller = createTextMotion(mountMarkup(chapter('01')))
     const initial = timelineFor(0)
+    controller.playChapter('01')
+    initial.totalTime(1)
     const onComplete = mocks.timelines[0].vars.onComplete as () => void
     onComplete()
 
     const replacement = mocks.splits[0].split.resplit() as TimelineMock
 
+    expect(initial.play).toHaveBeenCalledExactlyOnceWith(0)
+    expect(initial.totalTime()).toBe(1)
     expect(replacement.progress).toHaveBeenCalledWith(1)
+    expect(replacement.totalTime()).toBe(1)
     expect(replacement.paused()).toBe(true)
     expect(replacement.play).not.toHaveBeenCalled()
-    expect(initial.play).not.toHaveBeenCalled()
   })
 
   it('does not create scramble tweens for whitespace-only non-hero targets', () => {

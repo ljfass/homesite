@@ -539,14 +539,16 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
     const state: ChapterState = {}
     states.set(chapter, state)
 
+    const title = chapterElement.querySelector<HTMLElement>('[data-text-title]')
+    const label = chapterElement.querySelector<HTMLElement>('[data-text-label]')
+    const command = chapterElement.querySelector<HTMLElement>('[data-text-command]')
+    const copy = chapterElement.querySelector<HTMLElement>('[data-text-copy]')
+    const listItems = chapterElement.querySelectorAll<HTMLElement>('[data-text-list] > li')
+    const revealTargets = [copy, ...listItems].filter((target): target is HTMLElement => Boolean(target))
+    const labelText = label ? textOf(label) : ''
+    const commandText = command ? textOf(command) : ''
+
     const createTimeline = (lines: Element[]): gsap.core.Timeline => {
-      const label = chapterElement.querySelector<HTMLElement>('[data-text-label]')
-      const command = chapterElement.querySelector<HTMLElement>('[data-text-command]')
-      const labelText = label ? textOf(label) : ''
-      const commandText = command ? textOf(command) : ''
-      const copy = chapterElement.querySelector<HTMLElement>('[data-text-copy]')
-      const listItems = chapterElement.querySelectorAll<HTMLElement>('[data-text-list] > li')
-      const revealTargets = [copy, ...listItems].filter((target): target is HTMLElement => Boolean(target))
       const timeline = gsap.timeline({
         paused: true,
         onComplete: () => completed.add(chapter),
@@ -601,7 +603,6 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       return timeline
     }
 
-    const title = chapterElement.querySelector<HTMLElement>('[data-text-title]')
     if (title) {
       state.split = SplitText.create(title, {
         type: 'lines',
