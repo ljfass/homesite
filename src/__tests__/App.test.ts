@@ -104,27 +104,48 @@ describe('App', () => {
     expect(chapters.every((chapter) => chapter.findAll('[data-text-label]').length === 1)).toBe(true)
     expect(chapters.every((chapter) => chapter.findAll('[data-text-copy]').length === 1)).toBe(true)
 
-    const commands = wrapper.findAll<HTMLElement>('[data-text-command]')
-    expect(commands).toHaveLength(4)
-    expect(commands.every((command) => command.attributes('aria-hidden') === 'true')).toBe(true)
-    expect(commands.every((command) => command.attributes('aria-label') === undefined)).toBe(true)
-
-    const staticCommands = wrapper.findAll<HTMLElement>('[data-text-static="command"]')
-    expect(staticCommands.map((command) => command.text())).toEqual([
-      homeContent.hero.command,
-      ...homeContent.story.map((item) => item.command),
-    ])
-
-    const labels = wrapper.findAll<HTMLElement>('[data-text-label]')
-    expect(labels.every((label) => label.attributes('aria-hidden') === 'true')).toBe(true)
-    expect(labels.every((label) => label.attributes('aria-label') === undefined)).toBe(true)
-
-    const staticLabels = wrapper.findAll<HTMLElement>('[data-text-static="label"]')
-    expect(staticLabels.map((label) => label.text())).toEqual([
+    const expectedCommands = [homeContent.hero.command, ...homeContent.story.map((item) => item.command)]
+    const expectedLabels = [
       `${homeContent.hero.index} / ${homeContent.hero.eyebrow}`,
       ...homeContent.story.map((item) => `${item.index} / ${item.eyebrow}`),
       `${homeContent.ending.index} / ${homeContent.ending.eyebrow}`,
-    ])
+    ]
+
+    const commands = wrapper.findAll<HTMLElement>('[data-text-command]')
+    expect(commands).toHaveLength(expectedCommands.length)
+    commands.forEach((command, index) => {
+      const staticSibling = command.element.nextElementSibling
+
+      expect(command.element.tagName).toBe('SPAN')
+      expect(command.text()).toBe(expectedCommands[index])
+      expect(command.attributes('aria-hidden')).toBe('true')
+      expect(command.attributes('aria-label')).toBeUndefined()
+      expect(staticSibling).not.toBeNull()
+      expect(staticSibling?.tagName).toBe('SPAN')
+      expect(staticSibling?.matches('.sr-only[data-text-static="command"]')).toBe(true)
+      expect(staticSibling?.textContent).toBe(expectedCommands[index])
+    })
+
+    const staticCommands = wrapper.findAll<HTMLElement>('[data-text-static="command"]')
+    expect(staticCommands.map((command) => command.text())).toEqual(expectedCommands)
+
+    const labels = wrapper.findAll<HTMLElement>('[data-text-label]')
+    expect(labels).toHaveLength(expectedLabels.length)
+    labels.forEach((label, index) => {
+      const staticSibling = label.element.nextElementSibling
+
+      expect(label.element.tagName).toBe('SPAN')
+      expect(label.text()).toBe(expectedLabels[index])
+      expect(label.attributes('aria-hidden')).toBe('true')
+      expect(label.attributes('aria-label')).toBeUndefined()
+      expect(staticSibling).not.toBeNull()
+      expect(staticSibling?.tagName).toBe('SPAN')
+      expect(staticSibling?.matches('.sr-only[data-text-static="label"]')).toBe(true)
+      expect(staticSibling?.textContent).toBe(expectedLabels[index])
+    })
+
+    const staticLabels = wrapper.findAll<HTMLElement>('[data-text-static="label"]')
+    expect(staticLabels.map((label) => label.text())).toEqual(expectedLabels)
 
     expect(wrapper.findAll('.chapter-label').every((label) => label.attributes('aria-label') === undefined)).toBe(true)
     expect(wrapper.findAll('.terminal-command').every((command) => command.attributes('aria-label') === undefined)).toBe(true)
