@@ -542,6 +542,8 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
     const createTimeline = (lines: Element[]): gsap.core.Timeline => {
       const label = chapterElement.querySelector<HTMLElement>('[data-text-label]')
       const command = chapterElement.querySelector<HTMLElement>('[data-text-command]')
+      const labelText = label ? textOf(label) : ''
+      const commandText = command ? textOf(command) : ''
       const copy = chapterElement.querySelector<HTMLElement>('[data-text-copy]')
       const listItems = chapterElement.querySelectorAll<HTMLElement>('[data-text-list] > li')
       const revealTargets = [copy, ...listItems].filter((target): target is HTMLElement => Boolean(target))
@@ -550,13 +552,13 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
         onComplete: () => completed.add(chapter),
       })
 
-      if (chapter !== '00' && label && textOf(label)) {
+      if (chapter !== '00' && label && labelText) {
         timeline.to(
           label,
           {
             duration: 0.45,
             ease: 'none',
-            scrambleText: { text: textOf(label), chars: scrambleChars, speed: 0.6 },
+            scrambleText: { text: labelText, chars: scrambleChars, speed: 0.6 },
           },
           0,
         )
@@ -578,13 +580,13 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
         )
       }
 
-      if (command && textOf(command)) {
+      if (command && commandText) {
         timeline.to(
           command,
           {
             duration: 0.8,
             ease: 'none',
-            scrambleText: { text: textOf(command), chars: scrambleChars, speed: 0.6 },
+            scrambleText: { text: commandText, chars: scrambleChars, speed: 0.6 },
           },
           0.25,
         )
@@ -593,6 +595,8 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       state.timeline = timeline
       if (completed.has(chapter)) {
         timeline.progress(1)
+      } else if (played.has(chapter)) {
+        timeline.play()
       }
       return timeline
     }
@@ -647,7 +651,9 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
 }
 ```
 
-Chapter `00` keeps its `ENTRY` label static so the approved hero order remains title, body, then command. The `onSplit` callback must return the timeline expression. GSAP then records the animation time before an automatic re-split; the `completed` set additionally forces already-finished chapters back to progress `1` without replaying them.
+Chapter `00` keeps its `ENTRY` label static so the approved hero order remains title, body, then command. Cache each visual label/command's trimmed final text once, and do not create a ScrambleText tween when that value is empty. The `onSplit` callback must return the timeline expression. GSAP records the animation time before an automatic re-split: unplayed replacements remain paused, in-flight replacements call `timeline.play()` with no position so the restored time continues running, and completed replacements use `timeline.progress(1)` without playing. The controller tracks the latest replacement for cleanup while SplitText reverts the animation it owns.
+
+The controller test harness must model this lifecycle statefully: a resplit captures the old returned timeline's `totalTime()`, reverts that animation, restores the original heading markup, invokes `onSplit`, assigns the saved total time to the replacement, and retains it as SplitText-owned. Cover unplayed, in-flight, and completed replacements, repeated resplits that update cleanup ownership, heading restoration, titleless fallback cleanup, and whitespace-only visual label/command targets.
 
 - [ ] **Step 5: Verify focused behavior and TypeScript**
 

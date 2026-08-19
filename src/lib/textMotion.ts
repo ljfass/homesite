@@ -30,6 +30,8 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
     const title = chapterElement.querySelector<HTMLElement>('[data-text-title]')
     const label = chapterElement.querySelector<HTMLElement>('[data-text-label]')
     const command = chapterElement.querySelector<HTMLElement>('[data-text-command]')
+    const labelText = label ? trimmedText(label) : ''
+    const commandText = command ? trimmedText(command) : ''
     const copy = chapterElement.querySelector<HTMLElement>('[data-text-copy]')
     const listItems = Array.from(chapterElement.querySelectorAll<HTMLElement>('[data-text-list] > li'))
     const copyTargets = [copy, ...listItems].filter((target): target is HTMLElement => target !== null)
@@ -40,13 +42,13 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
         onComplete: () => completed.add(chapter),
       })
 
-      if (chapter !== '00' && label) {
+      if (chapter !== '00' && label && labelText) {
         timeline.to(
           label,
           {
             duration: 0.45,
             ease: 'none',
-            scrambleText: { text: trimmedText(label), chars: scrambleChars, speed: 0.6 },
+            scrambleText: { text: labelText, chars: scrambleChars, speed: 0.6 },
           },
           0,
         )
@@ -68,19 +70,23 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
         )
       }
 
-      if (command) {
+      if (command && commandText) {
         timeline.to(
           command,
           {
             duration: 0.8,
             ease: 'none',
-            scrambleText: { text: trimmedText(command), chars: scrambleChars, speed: 0.6 },
+            scrambleText: { text: commandText, chars: scrambleChars, speed: 0.6 },
           },
           0.25,
         )
       }
 
-      if (completed.has(chapter)) timeline.progress(1)
+      if (completed.has(chapter)) {
+        timeline.progress(1)
+      } else if (played.has(chapter)) {
+        timeline.play()
+      }
       const state = states.get(chapter)
       if (state) state.timeline = timeline
       return timeline

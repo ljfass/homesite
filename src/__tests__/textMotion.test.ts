@@ -1,17 +1,24 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, type Mock, vi } from 'vitest'
 
 type TimelineMock = {
-  from: ReturnType<typeof vi.fn>
-  to: ReturnType<typeof vi.fn>
-  play: ReturnType<typeof vi.fn>
-  progress: ReturnType<typeof vi.fn>
-  revert: ReturnType<typeof vi.fn>
-  kill: ReturnType<typeof vi.fn>
+  from: Mock<(...args: unknown[]) => TimelineMock>
+  to: Mock<(...args: unknown[]) => TimelineMock>
+  play: Mock<(position?: number) => TimelineMock>
+  progress: Mock<(value?: number) => TimelineMock>
+  totalTime: Mock<(value?: number) => number | TimelineMock>
+  paused: Mock<(value?: boolean) => boolean | TimelineMock>
+  revert: Mock<() => TimelineMock>
+  kill: Mock<() => TimelineMock>
 }
 
 type SplitMock = {
+  target: HTMLElement
   lines: HTMLElement[]
-  revert: ReturnType<typeof vi.fn>
+  revert: Mock<() => void>
+  resplit: Mock<() => TimelineMock | undefined>
+  animation: TimelineMock | undefined
+  originalHTML: string
+  originalText: string
 }
 
 const mocks = vi.hoisted(() => {
@@ -23,32 +30,94 @@ const mocks = vi.hoisted(() => {
   }> = []
 
   const timeline = vi.fn((vars: Record<string, unknown> = {}) => {
+    const state = {
+      paused: vars.paused === true,
+      totalTime: 0,
+      reverted: false,
+      killed: false,
+    }
     const instance: TimelineMock = {
-      from: vi.fn(),
-      to: vi.fn(),
-      play: vi.fn(),
-      progress: vi.fn(),
-      revert: vi.fn(),
-      kill: vi.fn(),
+      from: vi.fn<(...args: unknown[]) => TimelineMock>(),
+      to: vi.fn<(...args: unknown[]) => TimelineMock>(),
+      play: vi.fn<(position?: number) => TimelineMock>((position?: number) => {
+        state.paused = false
+        if (typeof position === 'number') state.totalTime = position
+        return instance
+      }),
+      progress: vi.fn<(value?: number) => TimelineMock>((value?: number) => {
+        if (typeof value === 'number') {
+          state.totalTime = value
+          if (value === 1) state.paused = true
+        }
+        return instance
+      }),
+      totalTime: vi.fn<(value?: number) => number | TimelineMock>((value?: number) => {
+        if (typeof value === 'number') {
+          state.totalTime = value
+          return instance
+        }
+        return state.totalTime
+      }),
+      paused: vi.fn<(value?: boolean) => boolean | TimelineMock>((value?: boolean) => {
+        if (typeof value === 'boolean') {
+          state.paused = value
+          return instance
+        }
+        return state.paused
+      }),
+      revert: vi.fn<() => TimelineMock>(() => {
+        state.reverted = true
+        return instance
+      }),
+      kill: vi.fn<() => TimelineMock>(() => {
+        state.killed = true
+        return instance
+      }),
     }
     instance.from.mockReturnValue(instance)
     instance.to.mockReturnValue(instance)
-    instance.play.mockReturnValue(instance)
-    instance.progress.mockReturnValue(instance)
-    instance.revert.mockReturnValue(instance)
-    instance.kill.mockReturnValue(instance)
     timelines.push({ timeline: instance, vars })
     return instance
   })
 
   const create = vi.fn((target: HTMLElement, vars: Record<string, unknown>) => {
+    const originalHTML = target.innerHTML
+    const originalText = target.textContent ?? ''
     const split: SplitMock = {
+      target,
       lines: [document.createElement('span'), document.createElement('span')],
-      revert: vi.fn(),
+      revert: vi.fn<() => void>(),
+      resplit: vi.fn<() => TimelineMock | undefined>(),
+      animation: undefined,
+      originalHTML,
+      originalText,
     }
+    const applySplitMarkup = () => {
+      target.innerHTML = `<span data-test-split="true">${originalText}</span>`
+      split.lines = [document.createElement('span'), document.createElement('span')]
+    }
+    const runSplit = () => {
+      applySplitMarkup()
+      const onSplit = vars.onSplit
+      const animation = typeof onSplit === 'function' ? onSplit(split) : undefined
+      split.animation = animation as TimelineMock | undefined
+      return split.animation
+    }
+    split.revert.mockImplementation(() => {
+      split.animation?.revert()
+      target.innerHTML = originalHTML
+    })
+    split.resplit.mockImplementation(() => {
+      const oldAnimation = split.animation
+      const savedTotalTime = oldAnimation?.totalTime() as number | undefined
+      oldAnimation?.revert()
+      target.innerHTML = originalHTML
+      const replacement = runSplit()
+      if (typeof savedTotalTime === 'number') replacement?.totalTime(savedTotalTime)
+      return replacement
+    })
     splits.push({ target, vars, split })
-    const onSplit = vars.onSplit
-    if (typeof onSplit === 'function') onSplit(split)
+    runSplit()
     return split
   })
 
@@ -69,14 +138,32 @@ import { createTextMotion } from '../lib/textMotion'
 
 function chapter(
   id: string,
-  options: { title?: boolean; label?: boolean; command?: boolean; copy?: boolean; list?: boolean } = {},
+  options: {
+    title?: boolean
+    label?: boolean
+    command?: boolean
+    copy?: boolean
+    list?: boolean
+    labelText?: string
+    commandText?: string
+    titleMarkup?: string
+  } = {},
 ): string {
-  const { title = true, label = true, command = true, copy = true, list = false } = options
+  const {
+    title = true,
+    label = true,
+    command = true,
+    copy = true,
+    list = false,
+    labelText = `  ${id} / label  `,
+    commandText = `  command ${id}  `,
+    titleMarkup = `Title ${id}`,
+  } = options
   return `<section data-chapter="${id}">
-    ${label ? '<p><span data-text-label aria-hidden="true">  ' + id + ' / label  </span><span data-text-static="label">static label</span></p>' : ''}
-    ${title ? '<h2 data-text-title>Title ' + id + '</h2>' : ''}
+    ${label ? '<p><span data-text-label aria-hidden="true">' + labelText + '</span><span data-text-static="label">static label</span></p>' : ''}
+    ${title ? '<h2 data-text-title>' + titleMarkup + '</h2>' : ''}
     ${copy ? '<p data-text-copy>Copy ' + id + '</p>' : ''}
-    ${command ? '<p><span data-text-command aria-hidden="true">  command ' + id + '  </span><span data-text-static="command">static command</span></p>' : ''}
+    ${command ? '<p><span data-text-command aria-hidden="true">' + commandText + '</span><span data-text-static="command">static command</span></p>' : ''}
     ${list ? '<ul data-text-list><li>First</li><li>Second</li></ul>' : ''}
   </section>`
 }
@@ -205,32 +292,81 @@ describe('createTextMotion', () => {
     }, 0.2)
   })
 
-  it('keeps completed chapters at progress one after an automatic resplit', () => {
+  it('keeps an unplayed replacement paused at time zero after an automatic resplit', () => {
     createTextMotion(mountMarkup(chapter('01')))
     const initial = timelineFor(0)
-    const onComplete = mocks.timelines[0].vars.onComplete as () => void
-    const onSplit = mocks.splits[0].vars.onSplit as (split: SplitMock) => TimelineMock
+    const replacement = mocks.splits[0].split.resplit() as TimelineMock
 
-    onComplete()
-    const replacement = onSplit(mocks.splits[0].split)
-
-    expect(mocks.gsap.timeline).toHaveBeenCalledTimes(2)
-    expect(replacement.progress).toHaveBeenCalledWith(1)
+    expect(replacement.totalTime()).toBe(0)
+    expect(replacement.paused()).toBe(true)
     expect(replacement.play).not.toHaveBeenCalled()
     expect(initial.play).not.toHaveBeenCalled()
   })
 
-  it('reverts splits and latest timelines once while directly reverting only titleless fallbacks', () => {
-    const controller = createTextMotion(mountMarkup(`${chapter('01')}${chapter('02', { title: false })}`))
-    const splitTimeline = timelineFor(0)
-    const fallbackTimeline = timelineFor(1)
+  it('resumes an in-flight replacement after SplitText restores its saved time', () => {
+    const controller = createTextMotion(mountMarkup(chapter('01')))
+    const initial = timelineFor(0)
+    controller.playChapter('01')
+    initial.totalTime(0.4)
+
+    const replacement = mocks.splits[0].split.resplit() as TimelineMock
+
+    expect(initial.play).toHaveBeenCalledExactlyOnceWith(0)
+    expect(replacement.totalTime()).toBe(0.4)
+    expect(replacement.play).toHaveBeenCalledExactlyOnceWith()
+    expect(replacement.paused()).toBe(false)
+  })
+
+  it('keeps completed chapters at progress one after an automatic resplit', () => {
+    createTextMotion(mountMarkup(chapter('01')))
+    const initial = timelineFor(0)
+    const onComplete = mocks.timelines[0].vars.onComplete as () => void
+    onComplete()
+
+    const replacement = mocks.splits[0].split.resplit() as TimelineMock
+
+    expect(replacement.progress).toHaveBeenCalledWith(1)
+    expect(replacement.paused()).toBe(true)
+    expect(replacement.play).not.toHaveBeenCalled()
+    expect(initial.play).not.toHaveBeenCalled()
+  })
+
+  it('does not create scramble tweens for whitespace-only non-hero targets', () => {
+    createTextMotion(mountMarkup(chapter('01', { labelText: '  \n ', commandText: ' \t ' })))
+
+    expect(timelineFor(0).to).not.toHaveBeenCalled()
+  })
+
+  it('reverts each current split animation and kills only the latest replacement', () => {
+    const controller = createTextMotion(mountMarkup(chapter('01', { titleMarkup: 'Title <em>01</em>' })))
+    const split = mocks.splits[0].split
+    const originalHTML = split.originalHTML
+    const originalText = split.originalText
+    const initial = timelineFor(0)
+    const firstReplacement = split.resplit() as TimelineMock
+    const latestReplacement = split.resplit() as TimelineMock
 
     controller.revert()
     controller.revert()
 
-    expect(mocks.splits[0].split.revert).toHaveBeenCalledTimes(1)
-    expect(splitTimeline.revert).not.toHaveBeenCalled()
-    expect(splitTimeline.kill).toHaveBeenCalledTimes(1)
+    expect(initial.revert).toHaveBeenCalledTimes(1)
+    expect(firstReplacement.revert).toHaveBeenCalledTimes(1)
+    expect(latestReplacement.revert).toHaveBeenCalledTimes(1)
+    expect(split.revert).toHaveBeenCalledTimes(1)
+    expect(latestReplacement.kill).toHaveBeenCalledTimes(1)
+    expect(initial.kill).not.toHaveBeenCalled()
+    expect(firstReplacement.kill).not.toHaveBeenCalled()
+    expect(split.target.innerHTML).toBe(originalHTML)
+    expect(split.target.textContent).toBe(originalText)
+  })
+
+  it('directly reverts a titleless fallback timeline once', () => {
+    const controller = createTextMotion(mountMarkup(chapter('02', { title: false })))
+    const fallbackTimeline = timelineFor(0)
+
+    controller.revert()
+    controller.revert()
+
     expect(fallbackTimeline.revert).toHaveBeenCalledTimes(1)
     expect(fallbackTimeline.kill).toHaveBeenCalledTimes(1)
   })
