@@ -15,19 +15,23 @@ function backToTop() {
 </script>
 
 <template>
-  <footer data-site-footer>
-    <p>{{ site.domain }}</p>
-    <p>{{ site.title }}</p>
-    <p>© {{ currentYear }} {{ site.domain }}</p>
-    <a
-      v-if="site.icpNumber"
-      href="https://beian.miit.gov.cn/"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      {{ site.icpNumber }}
-    </a>
-    <button type="button" data-back-to-top aria-label="回到顶部" @click="backToTop">
+  <footer class="site-footer" data-site-footer>
+    <div class="site-footer__identity">
+      <p>{{ site.domain }}</p>
+      <p>{{ site.title }}</p>
+    </div>
+    <div class="site-footer__legal">
+      <p>© {{ currentYear }} {{ site.domain }}</p>
+      <a
+        v-if="site.icpNumber"
+        href="https://beian.miit.gov.cn/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {{ site.icpNumber }}
+      </a>
+    </div>
+    <button class="site-footer__top" type="button" data-back-to-top aria-label="回到顶部" @click="backToTop">
       <ArrowUp aria-hidden="true" />
     </button>
   </footer>

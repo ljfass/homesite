@@ -57,6 +57,31 @@ describe('App', () => {
     expect(document.title).toBe(homeContent.site.title)
     expect(document.querySelector('meta[name="description"]')?.getAttribute('content')).toBe(homeContent.site.description)
   })
+
+  it('renders the signal artwork as a reserved decorative image', () => {
+    const wrapper = mount(App)
+    wrappers.push(wrapper)
+
+    const image = wrapper.get('img[data-signal-visual]')
+    expect(image.attributes('src')).toMatch(/signal-field\.webp$/)
+    expect(image.attributes('alt')).toBe('')
+    expect(image.attributes('width')).toBe('1800')
+    expect(image.attributes('height')).toBe('1013')
+    expect(image.attributes('decoding')).toBe('async')
+    expect(image.attributes('fetchpriority')).toBe('high')
+  })
+
+  it('keeps the visual layout contracts on the page shell and story rail', () => {
+    const wrapper = mount(App)
+    wrappers.push(wrapper)
+
+    expect(wrapper.get('[data-page-shell]').classes()).toContain('site-shell')
+    expect(wrapper.get('[data-chapter="00"]').classes()).toContain('hero')
+    expect(wrapper.get('[data-story-stage]').classes()).toContain('story-stage')
+    expect(wrapper.get('[data-story-track]').classes()).toContain('story-track')
+    expect(wrapper.findAll('[data-story-panel].story-panel')).toHaveLength(5)
+    expect(wrapper.get('[role="progressbar"]').classes()).toContain('site-progress__track')
+  })
 })
 
 describe('SiteFooter', () => {

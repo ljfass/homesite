@@ -24,7 +24,7 @@ if (description) {
 </script>
 
 <template>
-  <div ref="page">
+  <div ref="page" class="site-shell" data-page-shell>
     <a class="skip-link" href="#main-content">跳到主要内容</a>
     <SiteHeader :domain="homeContent.site.domain" :progress="progress" :chapter="chapter" />
     <main id="main-content">
