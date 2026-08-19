@@ -11,6 +11,7 @@
   --color-line-light: #bdc7c0;
   --color-signal: #a7f3ad;
   --color-coral: #ff8060;
+  --color-coral-on-light: #a63b24;
   --font-display: 'JetBrains Mono Variable', 'PingFang SC', 'Microsoft YaHei', ui-monospace, monospace;
   --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   --space-1: 0.25rem;
@@ -32,14 +33,14 @@
   --z-skip: 100;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 600px) {
   :root {
     --gutter: 2.5rem;
     --header-height: 4.5rem;
   }
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1200px) and (min-height: 600px) {
   :root {
     --gutter: 4rem;
   }

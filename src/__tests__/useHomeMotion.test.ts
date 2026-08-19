@@ -152,15 +152,15 @@ describe('useHomeMotion', () => {
     expect(mocks.ScrollTrigger.create).not.toHaveBeenCalled()
     expect(mocks.media.add).toHaveBeenCalledTimes(1)
     expect(mocks.media.add.mock.calls[0][0]).toEqual({
-      desktop: '(min-width: 768px)',
-      mobile: '(max-width: 767px)',
+      desktop: '(min-width: 768px) and (min-height: 600px)',
+      mobile: '(max-width: 767px), (max-height: 599px)',
       reduceMotion: '(prefers-reduced-motion: reduce)',
     })
     expect(mocks.media.add.mock.calls[0][2]).toBe(wrapper.element)
     expect(mocks.ScrollTrigger.refresh).toHaveBeenCalledTimes(1)
   })
 
-  it('reveals mobile panels and updates chapter progress from non-pinning triggers', async () => {
+  it('reveals compact panels and updates chapter progress from non-pinning triggers', async () => {
     configureGsap({ desktop: false, mobile: true, reduceMotion: false })
     setFontsReady(Promise.resolve())
 

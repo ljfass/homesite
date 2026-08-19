@@ -282,6 +282,13 @@ a[href] {
   color: var(--color-text-dark-muted);
 }
 
+.story-panel[data-chapter='01'] .chapter-label,
+.story-panel[data-chapter='03'] .chapter-label,
+.story-panel[data-chapter='01'] .status-list li span + span,
+.story-panel[data-chapter='03'] .status-list li span + span {
+  color: var(--color-coral-on-light);
+}
+
 .story-panel[data-chapter='01'] .terminal-command,
 .story-panel[data-chapter='03'] .terminal-command {
   color: #23652c;
@@ -319,7 +326,7 @@ a[href] {
   font-size: 0.875rem;
 }
 
-.status-list li span:last-child {
+.status-list li span + span {
   color: var(--color-coral);
 }
 
@@ -381,7 +388,7 @@ a[href] {
   background: var(--color-paper);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 600px) {
   .site-progress__track {
     width: 7.5rem;
   }
@@ -482,7 +489,7 @@ a[href] {
   }
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1200px) and (min-height: 600px) {
   .hero__title {
     font-size: 8.5rem;
   }
@@ -492,7 +499,7 @@ a[href] {
   }
 }
 
-@media (max-width: 767px), (prefers-reduced-motion: reduce) {
+@media (max-width: 767px), (max-height: 599px), (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }

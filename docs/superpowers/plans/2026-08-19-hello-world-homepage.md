@@ -505,7 +505,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onProgress: (value:
     const scope = root.value
 
     media.add('(prefers-reduced-motion: reduce)', () => undefined)
-    media.add('(prefers-reduced-motion: no-preference) and (min-width: 768px)', () => {
+    media.add('(prefers-reduced-motion: no-preference) and (min-width: 768px) and (min-height: 600px)', () => {
       const context = gsap.context(() => {
         gsap.timeline().from('[data-hero-line]', { yPercent: 110, opacity: 0, stagger: 0.08, duration: 0.7 })
         const stage = scope.querySelector<HTMLElement>('[data-story-stage]')
@@ -528,7 +528,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onProgress: (value:
       return () => context.revert()
     })
 
-    media.add('(prefers-reduced-motion: no-preference) and (max-width: 767px)', () => {
+    media.add('(prefers-reduced-motion: no-preference) and (max-width: 767px), (prefers-reduced-motion: no-preference) and (max-height: 599px)', () => {
       const context = gsap.context(() => {
         ScrollTrigger.batch('[data-story-panel]', {
           start: 'top 82%', once: true,
@@ -599,6 +599,7 @@ Save the optimized 3:2 output as `src/assets/signal-field.webp` and keep it unde
   --color-muted: #a7b1a8;
   --color-signal: #91f4a4;
   --color-pulse: #ff825a;
+  --color-pulse-on-light: #a63b24;
   --font-display: 'JetBrains Mono Variable', ui-monospace, monospace;
   --font-body: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --space-1: 0.5rem;
@@ -626,10 +627,10 @@ button, a { touch-action: manipulation; }
 .hero { min-height: 90dvh; }
 .story-track { display: flex; width: max-content; }
 .story-panel { width: min(82vw, 1080px); min-height: 100dvh; border-right: 1px solid var(--color-line); }
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 600px) {
   .hero { min-height: 92dvh; }
 }
-@media (max-width: 767px), (prefers-reduced-motion: reduce) {
+@media (max-width: 767px), (max-height: 599px), (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .story-track { display: block; width: 100%; transform: none !important; }
   .story-panel { width: 100%; min-height: auto; }
@@ -639,7 +640,7 @@ button, a { touch-action: manipulation; }
 }
 ```
 
-The `90dvh` mobile and `92dvh` desktop hero heights are intentional stable breakpoint dimensions: they leave a visible hint of the next section in the first viewport. Hero and chapter font sizes likewise use fixed values at explicit breakpoints, never `vw` sizing or viewport-continuous scaling.
+The `90dvh` compact and `92dvh` desktop hero heights are intentional stable breakpoint dimensions: they leave a visible hint of the next section in the first viewport. Desktop layout requires both `min-width: 768px` and `min-height: 600px`; `(max-width: 767px), (max-height: 599px)` uses normal vertical flow, including `844×390` short landscape. Hero and chapter font sizes likewise use fixed values at explicit breakpoints, never `vw` sizing or viewport-continuous scaling.
 
 Complete the component-level classes with a stable sticky header, large but responsive title, section grids, visible progress bar, hover/focus states, safe-area padding, and no horizontal overflow at 320px.
 
@@ -685,6 +686,7 @@ export default defineConfig({
   projects: [
     { name: 'desktop', use: { viewport: { width: 1440, height: 900 } } },
     { name: 'mobile', use: { ...devices['iPhone 13'] } },
+    { name: 'short-landscape', use: { viewport: { width: 844, height: 390 } } },
     { name: 'reduced-motion', use: { viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' } },
   ],
 })
@@ -733,7 +735,7 @@ test('back to top works', async ({ page }) => {
 
 Run: `npx playwright install chromium` if Chromium is absent, then `npm run test:e2e`.
 
-Expected: the page boots in all three projects; desktop changes the track transform after scroll; mobile and reduced-motion have no `.pin-spacer`; every project has no viewport overflow and reaches the ending.
+Expected: the page boots in all four projects; desktop changes the track transform after scroll; mobile, short landscape and reduced-motion have no `.pin-spacer`; every project has no viewport overflow and reaches the ending.
 
 - [ ] **Step 4: Verify all browser projects**
 
@@ -771,6 +773,7 @@ Capture at least:
 
 - Desktop `1440×900`: hero top, horizontal story mid-progress and ending.
 - Mobile `390×844`: hero, stacked story and footer.
+- Short landscape `844×390`: hero, stacked story and footer without clipping or pinning.
 - Desktop `1440×900` with reduced motion.
 
 Inspect each image for blank artwork, clipping, horizontal viewport overflow, unreadable contrast, content overlap and hidden controls.

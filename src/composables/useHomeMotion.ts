@@ -89,8 +89,8 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     media = gsap.matchMedia()
     media.add(
       {
-        desktop: '(min-width: 768px)',
-        mobile: '(max-width: 767px)',
+        desktop: '(min-width: 768px) and (min-height: 600px)',
+        mobile: '(max-width: 767px), (max-height: 599px)',
         reduceMotion: '(prefers-reduced-motion: reduce)',
       },
       (context) => {
