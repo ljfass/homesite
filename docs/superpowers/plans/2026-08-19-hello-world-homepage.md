@@ -44,6 +44,7 @@
 - Create: `index.html`
 - Create: `tsconfig.json`
 - Create: `tsconfig.app.json`
+- Create: `tsconfig.node.json`
 - Create: `vite.config.ts`
 - Create: `vitest.setup.ts`
 - Create: `src/env.d.ts`
@@ -56,9 +57,12 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
+    "build": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -73,7 +77,7 @@ Run:
 
 ```bash
 npm install vue gsap lucide-vue-next @fontsource-variable/jetbrains-mono
-npm install -D vite typescript vue-tsc @vitejs/plugin-vue vitest @vue/test-utils jsdom @playwright/test
+npm install -D vite typescript vue-tsc @vitejs/plugin-vue vitest @vue/test-utils jsdom @playwright/test @types/node
 ```
 
 Expected: `package-lock.json` is created and `npm ls --depth=0` exits with code 0.
@@ -85,7 +89,10 @@ Expected: `package-lock.json` is created and `npm ls --depth=0` exits with code 
 ```json
 {
   "files": [],
-  "references": [{ "path": "./tsconfig.app.json" }]
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
 }
 ```
 
@@ -103,17 +110,35 @@ Expected: `package-lock.json` is created and `npm ls --depth=0` exits with code 
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
+    "noEmit": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "vitest/globals"]
+    "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "vite.config.ts", "vitest.setup.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
+}
+```
+
+`tsconfig.node.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "lib": ["ES2022", "ESNext.Disposable", "DOM"],
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["vite.config.ts", "vitest.setup.ts", "playwright.config.ts"]
 }
 ```
 
 `vite.config.ts`:
 
 ```ts
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
