@@ -16,12 +16,14 @@ const mocks = vi.hoisted(() => {
       timeline: vi.fn(),
       to: vi.fn(),
       from: vi.fn(),
+      set: vi.fn(),
     },
     ScrollTrigger: {
       batch: vi.fn(),
       create: vi.fn(),
       refresh: vi.fn(),
     },
+    mediaCleanup: undefined as (() => void) | undefined,
   }
 })
 
@@ -80,19 +82,24 @@ function configureGsap(conditions: Record<string, boolean>): void {
   mocks.media.add.mockReset().mockImplementation((queries, callback, scope) => {
     void queries
     void scope
-    callback({ conditions: mocks.conditions })
+    const cleanup = callback({ conditions: mocks.conditions })
+    mocks.mediaCleanup = typeof cleanup === 'function' ? cleanup : undefined
   })
-  mocks.media.revert.mockReset()
+  mocks.media.revert.mockReset().mockImplementation(() => {
+    mocks.mediaCleanup?.()
+    mocks.mediaCleanup = undefined
+  })
   mocks.gsap.matchMedia.mockReset().mockReturnValue(mocks.media)
   mocks.gsap.timeline.mockReset().mockReturnValue({ from: vi.fn().mockReturnThis() })
   mocks.gsap.to.mockReset()
   mocks.gsap.from.mockReset()
+  mocks.gsap.set.mockReset()
   mocks.ScrollTrigger.batch.mockReset()
   mocks.ScrollTrigger.create.mockReset()
   mocks.ScrollTrigger.refresh.mockReset()
 }
 
-function mountHarness(options: { image?: boolean } = {}): { reports: MotionReport[]; wrapper: VueWrapper } {
+function mountHarness(options: { image?: boolean; story?: boolean } = {}): { reports: MotionReport[]; wrapper: VueWrapper } {
   const reports: MotionReport[] = []
   const Harness = defineComponent({
     setup() {
@@ -106,6 +113,7 @@ function mountHarness(options: { image?: boolean } = {}): { reports: MotionRepor
           ...['00', '01', '02', '03', '04'].map((chapter) =>
             h('section', { 'data-chapter': chapter, 'data-story-panel': '' }),
           ),
+          options.story ? h('section', { 'data-story-stage': '' }, [h('div', { 'data-story-track': '' })]) : null,
           options.image ? h('img', { src: '/placeholder.png' }) : null,
         ])
     },
@@ -120,6 +128,8 @@ function mountHarness(options: { image?: boolean } = {}): { reports: MotionRepor
 afterEach(() => {
   wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
   restoreProperty(document, 'fonts', originalFonts)
   restoreProperty(window, 'matchMedia', originalMatchMedia)
   restoreProperty(HTMLImageElement.prototype, 'complete', originalImageComplete)
@@ -173,6 +183,76 @@ describe('useHomeMotion', () => {
       { progress: 0, chapter: '00' },
       { progress: 0.75, chapter: '03' },
     ])
+  })
+
+  it('creates and cleans up the horizontal tween when desktop overflow crosses zero', async () => {
+    configureGsap({ desktop: true, mobile: false, reduceMotion: false })
+    const fonts = deferred<void>()
+    setFontsReady(fonts.promise)
+    const firstTween = { kill: vi.fn() }
+    const secondTween = { kill: vi.fn() }
+    mocks.gsap.to.mockReturnValueOnce(firstTween).mockReturnValueOnce(secondTween)
+    const observed: Element[] = []
+    let observer: { callback: ResizeObserverCallback; disconnect: ReturnType<typeof vi.fn> } | undefined
+    let frame: FrameRequestCallback | undefined
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    })
+
+    class TestResizeObserver {
+      callback: ResizeObserverCallback
+      disconnect = vi.fn()
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback
+        observer = this
+      }
+
+      observe(target: Element): void {
+        observed.push(target)
+      }
+
+      unobserve(): void {}
+    }
+
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const { reports, wrapper } = mountHarness({ story: true })
+    const stage = wrapper.get('[data-story-stage]').element
+    const track = wrapper.get('[data-story-track]').element
+    let trackWidth = 1000
+    Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1000 })
+    Object.defineProperty(track, 'scrollWidth', { configurable: true, get: () => trackWidth })
+
+    fonts.resolve()
+    await settle()
+    expect(mocks.gsap.to).not.toHaveBeenCalled()
+    expect(observed).toEqual([stage, track])
+
+    trackWidth = 1600
+    observer?.callback([], observer as unknown as ResizeObserver)
+    observer?.callback([], observer as unknown as ResizeObserver)
+    expect(requestFrame).toHaveBeenCalledTimes(1)
+    frame?.(0)
+    expect(mocks.gsap.to).toHaveBeenCalledTimes(1)
+
+    trackWidth = 1000
+    observer?.callback([], observer as unknown as ResizeObserver)
+    frame?.(0)
+    expect(firstTween.kill).toHaveBeenCalledTimes(1)
+    expect(mocks.gsap.set).toHaveBeenCalledWith(track, { x: 0 })
+    expect(reports).toContainEqual({ progress: 0, chapter: '00' })
+
+    trackWidth = 1600
+    observer?.callback([], observer as unknown as ResizeObserver)
+    frame?.(0)
+    wrapper.unmount()
+
+    expect(secondTween.kill).toHaveBeenCalledTimes(1)
+    expect(observer?.disconnect).toHaveBeenCalledTimes(1)
   })
 
   it('reverts the match-media context when the component unmounts', async () => {
@@ -238,6 +318,25 @@ describe('useHomeMotion', () => {
     expect(mocks.gsap.matchMedia).toHaveBeenCalledTimes(1)
   })
 
+  it('aborts pending image waits and removes listeners when the component unmounts', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+      configurable: true,
+      get: () => false,
+    })
+    const removeListener = vi.spyOn(HTMLImageElement.prototype, 'removeEventListener')
+
+    const { wrapper } = mountHarness({ image: true })
+    await settle()
+    wrapper.unmount()
+    await settle()
+
+    expect(mocks.gsap.matchMedia).not.toHaveBeenCalled()
+    expect(removeListener).toHaveBeenCalledWith('load', expect.any(Function))
+    expect(removeListener).toHaveBeenCalledWith('error', expect.any(Function))
+  })
+
   it('settles incomplete images on errors', async () => {
     const root = document.createElement('div')
     const image = document.createElement('img')
@@ -248,6 +347,25 @@ describe('useHomeMotion', () => {
     image.dispatchEvent(new Event('error'))
 
     await expect(settling).resolves.toBeUndefined()
+  })
+
+  it('times out pending image waits and removes their listeners', async () => {
+    vi.useFakeTimers()
+    const root = document.createElement('div')
+    const image = document.createElement('img')
+    Object.defineProperty(image, 'complete', { configurable: true, value: false })
+    const removeListener = vi.spyOn(image, 'removeEventListener')
+    root.append(image)
+    let settled = false
+
+    void waitForRootAssets(root, { timeoutMs: 25 }).then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(25)
+
+    expect(settled).toBe(true)
+    expect(removeListener).toHaveBeenCalledWith('load', expect.any(Function))
+    expect(removeListener).toHaveBeenCalledWith('error', expect.any(Function))
   })
 
   it('swallows image decode failures so asset settling cannot block setup', async () => {

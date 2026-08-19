@@ -4,20 +4,55 @@ import { getChapterFromProgress, getHorizontalTravel } from '../lib/motion'
 
 type MotionUpdate = (progress: number, chapter: string) => void
 
-function waitForImage(image: HTMLImageElement): Promise<void> {
-  if (image.complete) {
-    return image.decode?.().catch(() => undefined) ?? Promise.resolve()
-  }
+type RootAssetWaitOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
+}
 
+const assetTimeoutMs = 4_000
+
+function waitForImage(image: HTMLImageElement, { signal, timeoutMs }: Required<RootAssetWaitOptions>): Promise<void> {
   return new Promise((resolve) => {
-    const settle = () => resolve()
-    image.addEventListener('load', settle, { once: true })
-    image.addEventListener('error', settle, { once: true })
+    let settled = false
+    const settle = () => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      window.clearTimeout(timeout)
+      image.removeEventListener('load', settle)
+      image.removeEventListener('error', settle)
+      signal.removeEventListener('abort', settle)
+      resolve()
+    }
+
+    image.addEventListener('load', settle)
+    image.addEventListener('error', settle)
+    signal.addEventListener('abort', settle, { once: true })
+    const timeout = window.setTimeout(settle, timeoutMs)
+
+    if (signal.aborted) {
+      settle()
+      return
+    }
+
+    if (image.complete) {
+      void Promise.resolve()
+        .then(() => image.decode?.())
+        .then(settle, settle)
+    }
   })
 }
 
-export function waitForRootAssets(root: HTMLElement): Promise<void> {
-  return Promise.all(Array.from(root.querySelectorAll('img'), waitForImage)).then(() => undefined)
+export function waitForRootAssets(root: HTMLElement, options: RootAssetWaitOptions = {}): Promise<void> {
+  const controller = new AbortController()
+  const signal = options.signal ?? controller.signal
+  const timeoutMs = options.timeoutMs ?? assetTimeoutMs
+
+  return Promise.all(
+    Array.from(root.querySelectorAll('img'), (image) => waitForImage(image, { signal, timeoutMs })),
+  ).then(() => undefined)
 }
 
 function reportMobileChapter(chapter: string | undefined, onMotionUpdate: MotionUpdate): void {
@@ -33,7 +68,7 @@ function reportMobileChapter(chapter: string | undefined, onMotionUpdate: Motion
 
 export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: MotionUpdate): void {
   let media: gsap.MatchMedia | undefined
-  let resizeObserver: ResizeObserver | undefined
+  let assetAbortController: AbortController | undefined
   let disposed = false
 
   onMounted(async () => {
@@ -42,7 +77,11 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       return
     }
 
-    await Promise.all([document.fonts?.ready, waitForRootAssets(scope)])
+    assetAbortController = new AbortController()
+    await Promise.all([
+      document.fonts?.ready,
+      waitForRootAssets(scope, { signal: assetAbortController.signal }),
+    ])
     if (disposed || !window.matchMedia) {
       return
     }
@@ -87,24 +126,71 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
 
           if (stage && track) {
             const travel = () => getHorizontalTravel(track.scrollWidth, stage.clientWidth || window.innerWidth)
+            let horizontalTween: gsap.core.Tween | undefined
+            let resizeFrame: number | undefined
+            let resizeObserver: ResizeObserver | undefined
 
-            if (travel() > 0) {
-              gsap.to(track, {
-                x: () => -travel(),
-                ease: 'none',
-                scrollTrigger: {
-                  trigger: stage,
-                  start: 'top top',
-                  end: () => `+=${travel()}`,
-                  pin: true,
-                  scrub: 0.8,
-                  invalidateOnRefresh: true,
-                  anticipatePin: 1,
-                  onUpdate: (self) => {
-                    onMotionUpdate(self.progress, getChapterFromProgress(self.progress))
+            const resetHorizontalTween = () => {
+              horizontalTween?.kill()
+              horizontalTween = undefined
+              gsap.set(track, { x: 0 })
+              onMotionUpdate(0, '00')
+            }
+
+            const syncHorizontalTween = () => {
+              if (travel() <= 0) {
+                if (horizontalTween) {
+                  resetHorizontalTween()
+                }
+                return
+              }
+
+              if (!horizontalTween) {
+                horizontalTween = gsap.to(track, {
+                  x: () => -travel(),
+                  ease: 'none',
+                  scrollTrigger: {
+                    trigger: stage,
+                    start: 'top top',
+                    end: () => `+=${travel()}`,
+                    pin: true,
+                    scrub: 0.8,
+                    invalidateOnRefresh: true,
+                    anticipatePin: 1,
+                    onUpdate: (self) => {
+                      onMotionUpdate(self.progress, getChapterFromProgress(self.progress))
+                    },
                   },
-                },
+                })
+              }
+            }
+
+            syncHorizontalTween()
+
+            if (typeof ResizeObserver !== 'undefined') {
+              resizeObserver = new ResizeObserver(() => {
+                if (resizeFrame !== undefined) {
+                  return
+                }
+
+                resizeFrame = requestAnimationFrame(() => {
+                  resizeFrame = undefined
+                  syncHorizontalTween()
+                  ScrollTrigger.refresh()
+                })
               })
+              resizeObserver.observe(stage)
+              resizeObserver.observe(track)
+            }
+
+            return () => {
+              if (resizeFrame !== undefined) {
+                cancelAnimationFrame(resizeFrame)
+              }
+              resizeObserver?.disconnect()
+              if (horizontalTween) {
+                resetHorizontalTween()
+              }
             }
           }
         }
@@ -147,16 +233,11 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       scope,
     )
     ScrollTrigger.refresh()
-
-    if (typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(() => ScrollTrigger.refresh())
-      resizeObserver.observe(scope)
-    }
   })
 
   onBeforeUnmount(() => {
     disposed = true
-    resizeObserver?.disconnect()
+    assetAbortController?.abort()
     media?.revert()
   })
 }
