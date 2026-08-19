@@ -1,6 +1,8 @@
 import gsap from 'gsap'
+import ScrambleTextPlugin from 'gsap/ScrambleTextPlugin'
 import ScrollTrigger from 'gsap/ScrollTrigger'
+import SplitText from 'gsap/SplitText'
 
-gsap.registerPlugin(ScrollTrigger)
+gsap.registerPlugin(ScrollTrigger, SplitText, ScrambleTextPlugin)
 
-export { gsap, ScrollTrigger }
+export { gsap, ScrambleTextPlugin, ScrollTrigger, SplitText }
