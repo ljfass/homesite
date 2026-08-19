@@ -18,6 +18,8 @@ describe('motion helpers', () => {
     expect(getChapterFromProgress(0)).toBe('01')
     expect(getChapterFromProgress(0.249)).toBe('01')
     expect(getChapterFromProgress(0.25)).toBe('02')
+    expect(getChapterFromProgress(0.499)).toBe('02')
+    expect(getChapterFromProgress(0.5)).toBe('03')
     expect(getChapterFromProgress(0.75)).toBe('04')
     expect(getChapterFromProgress(1)).toBe('04')
     expect(getChapterFromProgress(-1)).toBe('01')

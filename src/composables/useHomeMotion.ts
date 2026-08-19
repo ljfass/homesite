@@ -102,10 +102,10 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           }
         }
 
-        ScrollTrigger.refresh()
       },
       scope,
     )
+    ScrollTrigger.refresh()
   })
 
   onBeforeUnmount(() => {
