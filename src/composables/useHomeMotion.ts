@@ -4,8 +4,36 @@ import { getChapterFromProgress, getHorizontalTravel } from '../lib/motion'
 
 type MotionUpdate = (progress: number, chapter: string) => void
 
+function waitForImage(image: HTMLImageElement): Promise<void> {
+  if (image.complete) {
+    return image.decode?.().catch(() => undefined) ?? Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    const settle = () => resolve()
+    image.addEventListener('load', settle, { once: true })
+    image.addEventListener('error', settle, { once: true })
+  })
+}
+
+export function waitForRootAssets(root: HTMLElement): Promise<void> {
+  return Promise.all(Array.from(root.querySelectorAll('img'), waitForImage)).then(() => undefined)
+}
+
+function reportMobileChapter(chapter: string | undefined, onMotionUpdate: MotionUpdate): void {
+  const index = Number(chapter)
+  if (!Number.isFinite(index)) {
+    onMotionUpdate(0, '00')
+    return
+  }
+
+  const clamped = Math.min(Math.max(Math.round(index), 0), 4)
+  onMotionUpdate(clamped / 4, String(clamped).padStart(2, '0'))
+}
+
 export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: MotionUpdate): void {
   let media: gsap.MatchMedia | undefined
+  let resizeObserver: ResizeObserver | undefined
   let disposed = false
 
   onMounted(async () => {
@@ -14,7 +42,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       return
     }
 
-    await document.fonts?.ready
+    await Promise.all([document.fonts?.ready, waitForRootAssets(scope)])
     if (disposed || !window.matchMedia) {
       return
     }
@@ -83,6 +111,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
 
         if (mobile) {
           const panels = scope.querySelectorAll<HTMLElement>('[data-story-panel]')
+          const chapters = scope.querySelectorAll<HTMLElement>('[data-chapter]')
 
           if (panels.length > 0) {
             ScrollTrigger.batch(panels, {
@@ -100,16 +129,34 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
               },
             })
           }
+
+          chapters.forEach((section) => {
+            const updateChapter = () => reportMobileChapter(section.dataset.chapter, onMotionUpdate)
+
+            ScrollTrigger.create({
+              trigger: section,
+              start: 'top 55%',
+              end: 'bottom 45%',
+              onEnter: updateChapter,
+              onEnterBack: updateChapter,
+            })
+          })
         }
 
       },
       scope,
     )
     ScrollTrigger.refresh()
+
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => ScrollTrigger.refresh())
+      resizeObserver.observe(scope)
+    }
   })
 
   onBeforeUnmount(() => {
     disposed = true
+    resizeObserver?.disconnect()
     media?.revert()
   })
 }
