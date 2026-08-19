@@ -623,9 +623,12 @@ button, a { touch-action: manipulation; }
 :focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .skip-link { position: fixed; left: 1rem; top: 1rem; z-index: 1000; transform: translateY(-160%); }
 .skip-link:focus { transform: translateY(0); }
-.hero { min-height: 100dvh; }
+.hero { min-height: 90dvh; }
 .story-track { display: flex; width: max-content; }
 .story-panel { width: min(82vw, 1080px); min-height: 100dvh; border-right: 1px solid var(--color-line); }
+@media (min-width: 768px) {
+  .hero { min-height: 92dvh; }
+}
 @media (max-width: 767px), (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .story-track { display: block; width: 100%; transform: none !important; }
@@ -635,6 +638,8 @@ button, a { touch-action: manipulation; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 ```
+
+The `90dvh` mobile and `92dvh` desktop hero heights are intentional stable breakpoint dimensions: they leave a visible hint of the next section in the first viewport. Hero and chapter font sizes likewise use fixed values at explicit breakpoints, never `vw` sizing or viewport-continuous scaling.
 
 Complete the component-level classes with a stable sticky header, large but responsive title, section grids, visible progress bar, hover/focus states, safe-area padding, and no horizontal overflow at 320px.
 
