@@ -21,7 +21,7 @@ if (description) {
   <SiteHeader :domain="homeContent.site.domain" :progress="progress" :chapter="chapter" />
   <main id="main-content">
     <HeroSection :hero="homeContent.hero" />
-    <HorizontalStory :stories="homeContent.story" :ending="homeContent.ending" />
+    <HorizontalStory :items="homeContent.story" :ending="homeContent.ending" />
   </main>
   <SiteFooter :site="homeContent.site" />
 </template>

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import App from '../App.vue'
+import HorizontalStory from '../components/HorizontalStory.vue'
 import SiteFooter from '../components/SiteFooter.vue'
 import { homeContent } from '../content/home'
 
@@ -86,5 +87,16 @@ describe('SiteFooter', () => {
     await wrapper.get('[data-back-to-top]').trigger('click')
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+  })
+})
+
+describe('HorizontalStory', () => {
+  it('accepts story panels through its items prop', () => {
+    const wrapper = mount(HorizontalStory, {
+      props: { items: homeContent.story, ending: homeContent.ending },
+    })
+    wrappers.push(wrapper)
+
+    expect(wrapper.findAll('[data-chapter="01"]')).toHaveLength(1)
   })
 })

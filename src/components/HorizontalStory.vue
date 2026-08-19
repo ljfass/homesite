@@ -10,7 +10,7 @@ type Ending = {
 }
 
 defineProps<{
-  stories: readonly StoryItem[]
+  items: readonly StoryItem[]
   ending: Ending
 }>()
 </script>
@@ -18,7 +18,7 @@ defineProps<{
 <template>
   <section data-story-stage aria-label="个人主页章节">
     <div data-story-track>
-      <StoryPanel v-for="story in stories" :key="story.id" :item="story" />
+      <StoryPanel v-for="story in items" :key="story.id" :item="story" />
       <section data-chapter="04" data-story-panel aria-labelledby="ending-title">
         <p>{{ ending.index }} / {{ ending.eyebrow }}</p>
         <h2 id="ending-title">
