@@ -520,15 +520,31 @@ export type TextMotionController = {
   revert: () => void
 }
 
+export type TextMotionOneShotState = {
+  played: Set<string>
+  completed: Set<string>
+  completedTimes: Map<string, number>
+}
+
+type TextMotionOptions = {
+  oneShotState?: TextMotionOneShotState
+}
+
 function textOf(target: HTMLElement): string {
   return target.textContent?.trim() ?? ''
 }
 
-export function createTextMotion(scope: HTMLElement): TextMotionController {
+export function createTextMotion(scope: HTMLElement, options: TextMotionOptions = {}): TextMotionController {
   const states = new Map<string, ChapterState>()
-  const played = new Set<string>()
-  const completed = new Set<string>()
-  const completedTimes = new Map<string, number>()
+  const ownsOneShotState = options.oneShotState === undefined
+  const oneShotState = options.oneShotState ?? {
+    played: new Set<string>(),
+    completed: new Set<string>(),
+    completedTimes: new Map<string, number>(),
+  }
+  const { played, completed, completedTimes } = oneShotState
+  const inheritedPlayed = new Set(played)
+  const activePlayed = new Set<string>()
   let reverted = false
 
   scope.querySelectorAll<HTMLElement>('[data-chapter]').forEach((chapterElement) => {
@@ -560,6 +576,11 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
           }
         },
       })
+
+      if (inheritedPlayed.has(chapter)) {
+        state.timeline = sequence
+        return sequence
+      }
 
       if (chapter !== '00' && label && labelText) {
         sequence.to(
@@ -610,7 +631,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
           timeline = gsap.timeline({ paused: true }).add(sequence)
         }
         timeline.progress(1)
-      } else if (played.has(chapter)) {
+      } else if (activePlayed.has(chapter)) {
         timeline.play()
       }
       state.timeline = timeline
@@ -643,6 +664,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       }
 
       played.add(chapter)
+      activePlayed.add(chapter)
       state.timeline.play(0)
     },
     revert() {
@@ -659,9 +681,12 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
         state.timeline?.kill()
       })
       states.clear()
-      played.clear()
-      completed.clear()
-      completedTimes.clear()
+      activePlayed.clear()
+      if (ownsOneShotState) {
+        played.clear()
+        completed.clear()
+        completedTimes.clear()
+      }
     },
   }
 }
