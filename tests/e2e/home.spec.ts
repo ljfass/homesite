@@ -101,6 +101,23 @@ async function expectBackToTop(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 8_000 }).toBeLessThan(2)
 }
 
+async function expectChapterTextVisible(page: Page, chapter: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.locator(`[data-chapter="${chapter}"]`).evaluate((section) =>
+          Array.from(section.querySelectorAll<HTMLElement>('[data-text-title], [data-text-copy], [data-text-command]')).every(
+            (element) => {
+              const styles = getComputedStyle(element)
+              return styles.visibility !== 'hidden' && Number(styles.opacity) > 0.98 && element.getClientRects().length > 0
+            },
+          ),
+        ),
+      { timeout: 8_000 },
+    )
+    .toBe(true)
+}
+
 test('desktop renders the hero and drives the horizontal story from scroll', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'desktop-only behavior')
   await openHomepage(page)
@@ -191,6 +208,46 @@ test('mobile keeps every chapter in a readable vertical flow', async ({ page }, 
     page.locator('.site-header, .hero__content, [data-story-panel] .story-panel__inner, [data-site-footer]'),
   )
   await expectBackToTop(page)
+})
+
+test('mobile preserves the active chapter when runtime motion preferences change', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'mobile-only behavior')
+  await openHomepage(page)
+  await expectVerticalFallback(page)
+
+  const chapter = page.locator('[data-chapter="03"]')
+  await chapter.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await expectChapterTextVisible(page, '03')
+
+  const initialMaskCount = await page.locator('.text-motion-line').count()
+  expect(initialMaskCount).toBeGreaterThan(0)
+  const initialScrollY = await page.evaluate(() => window.scrollY)
+
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect(chapter).toBeInViewport({ ratio: 0.1 })
+    await expect
+      .poll(() => page.evaluate((baseline) => Math.abs(window.scrollY - baseline), initialScrollY), { timeout: 8_000 })
+      .toBeLessThan(96)
+    await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+    await expect(page.locator('.text-motion-line')).toHaveCount(0)
+    await expectChapterTextVisible(page, '03')
+
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await expect(chapter).toBeInViewport({ ratio: 0.1 })
+    await expect
+      .poll(() => page.evaluate((baseline) => Math.abs(window.scrollY - baseline), initialScrollY), { timeout: 8_000 })
+      .toBeLessThan(96)
+    await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+    await expect
+      .poll(() => page.locator('.text-motion-line').count(), { timeout: 8_000 })
+      .toBe(initialMaskCount)
+    await expectChapterTextVisible(page, '03')
+  }
+
+  await expect(page.locator('.pin-spacer')).toHaveCount(0)
+  await expectNoHorizontalOverflow(page)
 })
 
 test('short landscape uses compact vertical layout without clipped content', async ({ page }, testInfo) => {

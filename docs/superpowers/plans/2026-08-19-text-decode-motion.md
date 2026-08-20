@@ -875,6 +875,10 @@ return () => {
 
 The separate no-preference context owns `textMotion.revert()`. Keep component unmount as `media?.revert()`; it invokes both scoped cleanups. Do not call `ScrollTrigger.killAll()`.
 
+### Runtime Preference Changes
+
+Keep canonical reading state from actual desktop progress updates and compact chapter entries, including the current chapter's viewport offset. Before GSAP reverts a match-media cycle, snapshot that state once; ignore synthetic trigger entries created while the cycle rebuilds. A native reduced-motion media-query listener schedules restoration only after GSAP finishes its post-match refresh. Restore the saved semantic anchor without smooth scrolling, resynchronize the header with the canonical progress/chapter, and invoke the newly active text controller for that chapter. Cancel pending animation frames and remove native media, scroll, and GSAP event listeners on unmount.
+
 - [ ] **Step 8: Verify orchestration and commit**
 
 Run:
@@ -1047,6 +1051,8 @@ for (const chapter of ['00', '01', '02', '03', '04']) {
 ```
 
 Expected: reduced motion retains unsplit final DOM and no text animation wrappers.
+
+Add a mobile runtime-preference regression that scrolls chapter `03` into its reading area, toggles to reduced motion and back twice with `page.emulateMedia()`, and verifies each transition retains the chapter/scroll position and `03 / 04` header. While reduced, assert no line masks and immediately visible final text; after motion returns, assert the original mask count is recreated without duplication and the active chapter settles to its final text. Retain no-pin, no-overflow, and runtime-error checks.
 
 - [ ] **Step 5: Run focused browser scenarios**
 

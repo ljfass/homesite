@@ -7,14 +7,29 @@ const mocks = vi.hoisted(() => {
     add: vi.fn(),
     revert: vi.fn(),
   }
+  const reducedMotionListeners = new Set<(event: MediaQueryListEvent) => void>()
+  const reducedMotionMedia = {
+    matches: false,
+    media: '(prefers-reduced-motion: reduce)',
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }
 
   return {
     media,
+    reducedMotionMedia,
+    reducedMotionListeners,
     conditions: {} as Record<string, boolean>,
     textMotion: { playChapter: vi.fn(), revert: vi.fn() },
     createTextMotion: vi.fn(),
     gsap: {
       matchMedia: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       timeline: vi.fn(),
       to: vi.fn(),
       from: vi.fn(),
@@ -24,8 +39,11 @@ const mocks = vi.hoisted(() => {
       batch: vi.fn(),
       create: vi.fn(),
       refresh: vi.fn(),
+      update: vi.fn(),
     },
     mediaCleanups: [] as Array<{ queries: string | object; scope: HTMLElement; cleanup: () => void }>,
+    matchMediaInitListener: undefined as (() => void) | undefined,
+    matchMediaListener: undefined as (() => void) | undefined,
   }
 })
 
@@ -92,6 +110,19 @@ function setFontsReady(ready: Promise<void>): void {
 function configureGsap(conditions: Record<string, boolean>): void {
   mocks.conditions = conditions
   mocks.mediaCleanups = []
+  mocks.reducedMotionListeners.clear()
+  mocks.reducedMotionMedia.matches = conditions.reduceMotion
+  mocks.reducedMotionMedia.addEventListener.mockReset().mockImplementation((type, listener) => {
+    if (type === 'change') {
+      mocks.reducedMotionListeners.add(listener)
+    }
+  })
+  mocks.reducedMotionMedia.removeEventListener.mockReset().mockImplementation((type, listener) => {
+    if (type === 'change') {
+      mocks.reducedMotionListeners.delete(listener)
+    }
+  })
+  vi.stubGlobal('matchMedia', vi.fn(() => mocks.reducedMotionMedia))
   mocks.media.add.mockReset().mockImplementation((queries, callback, scope) => {
     const isTextMedia = queries === '(prefers-reduced-motion: no-preference)'
     if (isTextMedia && mocks.conditions.reduceMotion) {
@@ -107,6 +138,24 @@ function configureGsap(conditions: Record<string, boolean>): void {
     mocks.mediaCleanups.splice(0).forEach(({ cleanup }) => cleanup())
   })
   mocks.gsap.matchMedia.mockReset().mockReturnValue(mocks.media)
+  mocks.gsap.addEventListener.mockReset().mockImplementation((event, listener) => {
+    if (event === 'matchMediaInit') {
+      mocks.matchMediaInitListener = listener
+    }
+    if (event === 'matchMedia') {
+      mocks.matchMediaListener = listener
+    }
+  })
+  mocks.gsap.removeEventListener.mockReset().mockImplementation((event, listener) => {
+    if (event === 'matchMediaInit' && mocks.matchMediaInitListener === listener) {
+      mocks.matchMediaInitListener = undefined
+    }
+    if (event === 'matchMedia' && mocks.matchMediaListener === listener) {
+      mocks.matchMediaListener = undefined
+    }
+  })
+  mocks.matchMediaInitListener = undefined
+  mocks.matchMediaListener = undefined
   mocks.gsap.timeline.mockReset().mockReturnValue({ from: vi.fn().mockReturnThis() })
   mocks.gsap.to.mockReset()
   mocks.gsap.from.mockReset()
@@ -114,6 +163,7 @@ function configureGsap(conditions: Record<string, boolean>): void {
   mocks.ScrollTrigger.batch.mockReset()
   mocks.ScrollTrigger.create.mockReset()
   mocks.ScrollTrigger.refresh.mockReset()
+  mocks.ScrollTrigger.update.mockReset()
   mocks.textMotion.playChapter.mockReset()
   mocks.textMotion.revert.mockReset()
   mocks.createTextMotion.mockReset().mockReturnValue(mocks.textMotion)
@@ -142,6 +192,39 @@ function replaceResponsiveContext(): void {
   if (typeof replacementCleanup === 'function') {
     mocks.mediaCleanups.push({ queries, scope, cleanup: replacementCleanup })
   }
+}
+
+function deactivateTextContext(): void {
+  const cleanupIndex = mocks.mediaCleanups.findIndex(({ queries }) => typeof queries === 'string')
+  if (cleanupIndex < 0) {
+    return
+  }
+
+  const [{ cleanup }] = mocks.mediaCleanups.splice(cleanupIndex, 1)
+  cleanup()
+}
+
+function activateTextContext(): void {
+  const textCall = mocks.media.add.mock.calls.find(([queries]) => typeof queries === 'string')
+  if (!textCall) {
+    return
+  }
+
+  const [queries, callback, scope] = textCall
+  const cleanup = callback({ conditions: mocks.conditions })
+  if (typeof cleanup === 'function') {
+    mocks.mediaCleanups.push({ queries, scope, cleanup })
+  }
+}
+
+function emitReducedMotionChange(matches: boolean): void {
+  mocks.reducedMotionMedia.matches = matches
+  const event = { matches, media: mocks.reducedMotionMedia.media } as MediaQueryListEvent
+  mocks.reducedMotionListeners.forEach((listener) => listener(event))
+}
+
+function emitGsapMatchMediaInit(): void {
+  mocks.matchMediaInitListener?.()
 }
 
 function mountHarness(
@@ -243,8 +326,107 @@ describe('useHomeMotion', () => {
 
     triggerCalls[0].trigger.dataset.chapter = 'invalid'
     triggerCalls[0].onEnter()
-    expect(reports).toContainEqual({ progress: 0, chapter: '00' })
-    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('invalid')
+    expect(reports.at(-1)).toEqual({ progress: 0, chapter: '00' })
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('00')
+
+    triggerCalls[0].trigger.dataset.chapter = '003'
+    triggerCalls[0].onEnter()
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('03')
+
+    triggerCalls[0].trigger.dataset.chapter = '9'
+    triggerCalls[0].onEnter()
+    expect(reports.at(-1)).toEqual({ progress: 1, chapter: '04' })
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('04')
+  })
+
+  it('restores the saved compact reading state after native preference changes settle', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const firstTextMotion = { playChapter: vi.fn(), revert: vi.fn() }
+    const replacementTextMotion = { playChapter: vi.fn(), revert: vi.fn() }
+    mocks.createTextMotion.mockReset().mockReturnValueOnce(firstTextMotion).mockReturnValueOnce(replacementTextMotion)
+    const frames = new Map<number, FrameRequestCallback>()
+    let frameId = 0
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frameId += 1
+      frames.set(frameId, callback)
+      return frameId
+    })
+    const cancelFrame = vi.fn((id: number) => frames.delete(id))
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 640, writable: true })
+
+    const { reports, wrapper } = mountHarness()
+    await settle()
+    const compactChapter = mocks.ScrollTrigger.create.mock.calls[3][0]
+    let anchorTop = 120
+    vi.spyOn(compactChapter.trigger, 'getBoundingClientRect').mockImplementation(
+      () => DOMRect.fromRect({ y: anchorTop }),
+    )
+    compactChapter.onEnter()
+    window.dispatchEvent(new Event('scroll'))
+    expect(mocks.reducedMotionMedia.addEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+
+    emitGsapMatchMediaInit()
+    mocks.ScrollTrigger.create.mock.calls[0][0].onEnter()
+    emitGsapMatchMediaInit()
+    mocks.ScrollTrigger.create.mock.calls[2][0].onEnter()
+    emitReducedMotionChange(true)
+    deactivateTextContext()
+    anchorTop = 760
+    window.scrollY = 0
+    window.dispatchEvent(new Event('scroll'))
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(requestFrame).toHaveBeenCalledTimes(1)
+    const firstFrame = frames.get(1)
+    firstFrame?.(0)
+    expect(scrollTo).not.toHaveBeenCalled()
+    const secondFrame = frames.get(2)
+    secondFrame?.(0)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 640, behavior: 'auto' })
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+
+    emitReducedMotionChange(false)
+    activateTextContext()
+    frames.get(3)?.(0)
+    frames.get(4)?.(0)
+    expect(replacementTextMotion.playChapter).toHaveBeenLastCalledWith('03')
+
+    wrapper.unmount()
+    expect(mocks.reducedMotionMedia.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+    expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMediaInit', expect.any(Function))
+    expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMedia', expect.any(Function))
+  })
+
+  it('cancels stale preference restoration frames and listeners on unmount', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = new Map<number, FrameRequestCallback>()
+    let frameId = 0
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frameId += 1
+      frames.set(frameId, callback)
+      return frameId
+    })
+    const cancelFrame = vi.fn((id: number) => frames.delete(id))
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+
+    const { wrapper } = mountHarness()
+    await settle()
+    emitReducedMotionChange(true)
+    emitReducedMotionChange(false)
+    expect(cancelFrame).toHaveBeenCalledWith(1)
+
+    wrapper.unmount()
+    expect(cancelFrame).toHaveBeenCalledWith(2)
+    expect(mocks.reducedMotionMedia.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+    expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMediaInit', expect.any(Function))
+    expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMedia', expect.any(Function))
+    expect(mocks.reducedMotionListeners).toEqual(new Set())
   })
 
   it('keeps text playback alive across responsive cleanup and reverts it only with the media context', async () => {

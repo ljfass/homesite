@@ -56,6 +56,8 @@ When `prefers-reduced-motion: reduce` is active:
 - Do not hide or translate text before display.
 - Render all final text immediately and preserve the existing vertical story fallback.
 
+When this preference changes while the page is open, preserve the reader's canonical chapter and viewport position. Let GSAP finish rebuilding its media contexts, then restore the saved semantic anchor without smooth scrolling, resynchronize header progress, and play the newly active text controller for that chapter. A reduced-motion placeholder or a trigger emitted while contexts are rebuilding must not replace the saved reading state.
+
 ## Motion Values
 
 - Title reveal duration: approximately `0.7s`.
@@ -103,6 +105,7 @@ The module does not own Vue lifecycle hooks or ScrollTrigger positioning.
 - Invoke `playChapter()` from the existing compact chapter triggers.
 - Avoid creating the text-motion module inside the reduced-motion branch.
 - Revert text motion through the existing match-media and component cleanup paths.
+- Capture real reading state and its chapter anchor before match-media contexts revert. Runtime preference changes restore that state after GSAP's post-match refresh; pending native media, scroll, animation-frame, and GSAP event listeners are removed on unmount.
 
 Text motion must not add another horizontal container animation or alter the main track tween.
 
@@ -157,6 +160,7 @@ If a chapter has already completed its sequence, a responsive re-split must leav
 - Cleanup kills timelines and reverts every SplitText instance.
 - Responsive re-splitting preserves completed progress.
 - Reduced-motion setup creates no SplitText or ScrambleText activity.
+- Runtime preference changes retain the saved canonical chapter for both progress reporting and text playback.
 - Final command and label strings match the typed content source.
 
 ### Browser Tests
@@ -166,6 +170,7 @@ If a chapter has already completed its sequence, a responsive re-split must leav
 - Mobile `390x844` and short landscape `844x390` remain vertical and unclipped.
 - Scrolling away from and back to a chapter does not replay its text sequence.
 - Reduced-motion mode contains no split wrappers, scrambled intermediate text, or pinning artifacts.
+- Runtime reduced-motion toggles retain the active mobile chapter and reading position, recreate one stable set of masks when motion returns, and produce no page errors or overflow after repeated changes.
 - All tested viewports have no horizontal page overflow, page errors, or console errors.
 
 ## Acceptance Criteria

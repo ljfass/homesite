@@ -5,6 +5,21 @@ import { createTextMotion, type TextMotionController } from '../lib/textMotion'
 
 type MotionUpdate = (progress: number, chapter: string) => void
 
+type ReadingState = {
+  progress: number
+  chapter: string
+}
+
+type ReadingSnapshot = ReadingState & {
+  anchor?: HTMLElement
+  anchorOffset: number
+}
+
+type MatchMediaEventSource = {
+  addEventListener: (event: 'matchMediaInit' | 'matchMedia', listener: () => void) => void
+  removeEventListener: (event: 'matchMediaInit' | 'matchMedia', listener: () => void) => void
+}
+
 type RootAssetWaitOptions = {
   signal?: AbortSignal
   timeoutMs?: number
@@ -56,20 +71,35 @@ export function waitForRootAssets(root: HTMLElement, options: RootAssetWaitOptio
   ).then(() => undefined)
 }
 
-function reportMobileChapter(chapter: string | undefined, onMotionUpdate: MotionUpdate): void {
+function getMobileReadingState(chapter: string | undefined): ReadingState {
   const index = Number(chapter)
   if (!Number.isFinite(index)) {
-    onMotionUpdate(0, '00')
-    return
+    return { progress: 0, chapter: '00' }
   }
 
   const clamped = Math.min(Math.max(Math.round(index), 0), 4)
-  onMotionUpdate(clamped / 4, String(clamped).padStart(2, '0'))
+  return { progress: clamped / 4, chapter: String(clamped).padStart(2, '0') }
 }
 
 export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: MotionUpdate): void {
   let media: gsap.MatchMedia | undefined
+  const matchMediaEvents = gsap as typeof gsap & MatchMediaEventSource
   let assetAbortController: AbortController | undefined
+  let reducedMotionMedia: MediaQueryList | undefined
+  let reducedMotionListener: ((event: MediaQueryListEvent) => void) | undefined
+  let matchMediaInitListener: (() => void) | undefined
+  let matchMediaListener: (() => void) | undefined
+  let scrollPositionListener: (() => void) | undefined
+  let restorationFrame: number | undefined
+  let matchMediaTransitionFrame: number | undefined
+  let restorationToken = 0
+  let savedScrollY = 0
+  let lastReadingState: ReadingState = { progress: 0, chapter: '00' }
+  let lastReadingAnchor: HTMLElement | undefined
+  let lastReadingAnchorOffset = 0
+  let mediaChangeSnapshot: ReadingSnapshot | undefined
+  let matchMediaTransitionActive = false
+  let preferenceRestorationPending = false
   let disposed = false
 
   onMounted(async () => {
@@ -77,6 +107,14 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     if (!scope) {
       return
     }
+
+    savedScrollY = window.scrollY
+    lastReadingAnchor = scope.querySelector<HTMLElement>('[data-chapter="00"]') ?? undefined
+    lastReadingAnchorOffset = lastReadingAnchor?.getBoundingClientRect().top ?? 0
+    scrollPositionListener = () => {
+      savedScrollY = window.scrollY
+    }
+    window.addEventListener('scroll', scrollPositionListener, { passive: true })
 
     assetAbortController = new AbortController()
     await Promise.all([
@@ -89,6 +127,53 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
 
     media = gsap.matchMedia()
     let textMotion: TextMotionController | undefined
+    const reportReadingState = (progress: number, chapter: string) => {
+      if (matchMediaTransitionActive || preferenceRestorationPending) {
+        return
+      }
+
+      lastReadingState = { progress, chapter }
+      const anchor = scope.querySelector<HTMLElement>(`[data-chapter="${chapter}"]`)
+      if (anchor) {
+        lastReadingAnchor = anchor
+        lastReadingAnchorOffset = anchor.getBoundingClientRect().top
+      }
+      onMotionUpdate(progress, chapter)
+    }
+    const scheduleReadingRestoration = () => {
+      const token = ++restorationToken
+      if (restorationFrame !== undefined) {
+        cancelAnimationFrame(restorationFrame)
+      }
+
+      restorationFrame = requestAnimationFrame(() => {
+        restorationFrame = requestAnimationFrame(() => {
+          restorationFrame = undefined
+          if (disposed || token !== restorationToken) {
+            return
+          }
+
+          const snapshot = mediaChangeSnapshot ?? {
+            progress: lastReadingState.progress,
+            chapter: lastReadingState.chapter,
+            anchor: lastReadingAnchor,
+            anchorOffset: lastReadingAnchorOffset,
+          }
+          const anchorScrollY = snapshot.anchor?.isConnected
+            ? Math.max(0, snapshot.anchor.getBoundingClientRect().top + window.scrollY - snapshot.anchorOffset)
+            : savedScrollY
+          lastReadingState = { progress: snapshot.progress, chapter: snapshot.chapter }
+          lastReadingAnchor = snapshot.anchor
+          lastReadingAnchorOffset = snapshot.anchorOffset
+          window.scrollTo({ top: anchorScrollY, behavior: 'auto' })
+          ScrollTrigger.update()
+          onMotionUpdate(snapshot.progress, snapshot.chapter)
+          textMotion?.playChapter(snapshot.chapter)
+          preferenceRestorationPending = false
+          mediaChangeSnapshot = undefined
+        })
+      })
+    }
     media.add(
       '(prefers-reduced-motion: no-preference)',
       () => {
@@ -165,7 +250,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
                     anticipatePin: 1,
                     onUpdate: (self) => {
                       const chapter = getChapterFromProgress(self.progress)
-                      onMotionUpdate(self.progress, chapter)
+                      reportReadingState(self.progress, chapter)
                       textMotion?.playChapter(chapter)
                     },
                   },
@@ -208,9 +293,9 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
 
           chapters.forEach((section) => {
             const updateChapter = () => {
-              const chapter = section.dataset.chapter
-              reportMobileChapter(chapter, onMotionUpdate)
-              if (chapter) textMotion?.playChapter(chapter)
+              const readingState = getMobileReadingState(section.dataset.chapter)
+              reportReadingState(readingState.progress, readingState.chapter)
+              textMotion?.playChapter(readingState.chapter)
             }
 
             ScrollTrigger.create({
@@ -231,11 +316,58 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       scope,
     )
     ScrollTrigger.refresh()
+    matchMediaInitListener = () => {
+      if (!matchMediaTransitionActive) {
+        mediaChangeSnapshot = {
+          progress: lastReadingState.progress,
+          chapter: lastReadingState.chapter,
+          anchor: lastReadingAnchor,
+          anchorOffset: lastReadingAnchorOffset,
+        }
+      }
+      matchMediaTransitionActive = true
+    }
+    matchMediaListener = () => {
+      if (matchMediaTransitionFrame !== undefined) {
+        cancelAnimationFrame(matchMediaTransitionFrame)
+      }
+      matchMediaTransitionFrame = requestAnimationFrame(() => {
+        matchMediaTransitionFrame = undefined
+        matchMediaTransitionActive = false
+      })
+    }
+    matchMediaEvents.addEventListener('matchMediaInit', matchMediaInitListener)
+    matchMediaEvents.addEventListener('matchMedia', matchMediaListener)
+    reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)')
+    reducedMotionListener = () => {
+      preferenceRestorationPending = true
+      scheduleReadingRestoration()
+    }
+    reducedMotionMedia.addEventListener('change', reducedMotionListener)
   })
 
   onBeforeUnmount(() => {
     disposed = true
     assetAbortController?.abort()
+    restorationToken += 1
+    if (restorationFrame !== undefined) {
+      cancelAnimationFrame(restorationFrame)
+    }
+    if (matchMediaTransitionFrame !== undefined) {
+      cancelAnimationFrame(matchMediaTransitionFrame)
+    }
+    if (scrollPositionListener) {
+      window.removeEventListener('scroll', scrollPositionListener)
+    }
+    if (reducedMotionMedia && reducedMotionListener) {
+      reducedMotionMedia.removeEventListener('change', reducedMotionListener)
+    }
+    if (matchMediaInitListener) {
+      matchMediaEvents.removeEventListener('matchMediaInit', matchMediaInitListener)
+    }
+    if (matchMediaListener) {
+      matchMediaEvents.removeEventListener('matchMedia', matchMediaListener)
+    }
     media?.revert()
   })
 }
