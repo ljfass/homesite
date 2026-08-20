@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => {
   return {
     media,
     conditions: {} as Record<string, boolean>,
+    textMotion: { playChapter: vi.fn(), revert: vi.fn() },
+    createTextMotion: vi.fn(),
     gsap: {
       matchMedia: vi.fn(),
       timeline: vi.fn(),
@@ -23,13 +25,17 @@ const mocks = vi.hoisted(() => {
       create: vi.fn(),
       refresh: vi.fn(),
     },
-    mediaCleanup: undefined as (() => void) | undefined,
+    mediaCleanups: [] as Array<{ queries: string | object; cleanup: () => void }>,
   }
 })
 
 vi.mock('../lib/gsap', () => ({
   gsap: mocks.gsap,
   ScrollTrigger: mocks.ScrollTrigger,
+}))
+
+vi.mock('../lib/textMotion', () => ({
+  createTextMotion: mocks.createTextMotion,
 }))
 
 import { useHomeMotion, waitForRootAssets } from '../composables/useHomeMotion'
@@ -79,15 +85,20 @@ function setFontsReady(ready: Promise<void>): void {
 
 function configureGsap(conditions: Record<string, boolean>): void {
   mocks.conditions = conditions
+  mocks.mediaCleanups = []
   mocks.media.add.mockReset().mockImplementation((queries, callback, scope) => {
-    void queries
-    void scope
+    const isTextMedia = queries === '(prefers-reduced-motion: no-preference)'
+    if (isTextMedia && mocks.conditions.reduceMotion) {
+      return
+    }
+
     const cleanup = callback({ conditions: mocks.conditions })
-    mocks.mediaCleanup = typeof cleanup === 'function' ? cleanup : undefined
+    if (typeof cleanup === 'function') {
+      mocks.mediaCleanups.push({ queries, cleanup })
+    }
   })
   mocks.media.revert.mockReset().mockImplementation(() => {
-    mocks.mediaCleanup?.()
-    mocks.mediaCleanup = undefined
+    mocks.mediaCleanups.splice(0).forEach(({ cleanup }) => cleanup())
   })
   mocks.gsap.matchMedia.mockReset().mockReturnValue(mocks.media)
   mocks.gsap.timeline.mockReset().mockReturnValue({ from: vi.fn().mockReturnThis() })
@@ -97,9 +108,14 @@ function configureGsap(conditions: Record<string, boolean>): void {
   mocks.ScrollTrigger.batch.mockReset()
   mocks.ScrollTrigger.create.mockReset()
   mocks.ScrollTrigger.refresh.mockReset()
+  mocks.textMotion.playChapter.mockReset()
+  mocks.textMotion.revert.mockReset()
+  mocks.createTextMotion.mockReset().mockReturnValue(mocks.textMotion)
 }
 
-function mountHarness(options: { image?: boolean; story?: boolean } = {}): { reports: MotionReport[]; wrapper: VueWrapper } {
+function mountHarness(
+  options: { image?: boolean; story?: boolean; signal?: boolean } = {},
+): { reports: MotionReport[]; wrapper: VueWrapper } {
   const reports: MotionReport[] = []
   const Harness = defineComponent({
     setup() {
@@ -114,6 +130,7 @@ function mountHarness(options: { image?: boolean; story?: boolean } = {}): { rep
             h('section', { 'data-chapter': chapter, 'data-story-panel': '' }),
           ),
           options.story ? h('section', { 'data-story-stage': '' }, [h('div', { 'data-story-track': '' })]) : null,
+          options.signal ? h('div', { 'data-signal-visual': '' }) : null,
           options.image ? h('img', { src: '/placeholder.png' }) : null,
         ])
     },
@@ -150,17 +167,22 @@ describe('useHomeMotion', () => {
     expect(mocks.gsap.from).not.toHaveBeenCalled()
     expect(mocks.ScrollTrigger.batch).not.toHaveBeenCalled()
     expect(mocks.ScrollTrigger.create).not.toHaveBeenCalled()
-    expect(mocks.media.add).toHaveBeenCalledTimes(1)
-    expect(mocks.media.add.mock.calls[0][0]).toEqual({
+    expect(mocks.createTextMotion).not.toHaveBeenCalled()
+    expect(mocks.textMotion.playChapter).not.toHaveBeenCalled()
+    expect(mocks.textMotion.revert).not.toHaveBeenCalled()
+    expect(mocks.media.add).toHaveBeenCalledTimes(2)
+    expect(mocks.media.add.mock.calls[0][0]).toBe('(prefers-reduced-motion: no-preference)')
+    expect(mocks.media.add.mock.calls[0][2]).toBe(wrapper.element)
+    expect(mocks.media.add.mock.calls[1][0]).toEqual({
       desktop: '(min-width: 768px) and (min-height: 600px)',
       mobile: '(max-width: 767px), (max-height: 599px)',
       reduceMotion: '(prefers-reduced-motion: reduce)',
     })
-    expect(mocks.media.add.mock.calls[0][2]).toBe(wrapper.element)
+    expect(mocks.media.add.mock.calls[1][2]).toBe(wrapper.element)
     expect(mocks.ScrollTrigger.refresh).toHaveBeenCalledTimes(1)
   })
 
-  it('reveals compact panels and updates chapter progress from non-pinning triggers', async () => {
+  it('updates compact chapter progress and text playback from non-pinning triggers', async () => {
     configureGsap({ desktop: false, mobile: true, reduceMotion: false })
     setFontsReady(Promise.resolve())
 
@@ -168,8 +190,11 @@ describe('useHomeMotion', () => {
     await settle()
 
     expect(mocks.gsap.matchMedia).toHaveBeenCalledTimes(1)
-    expect(mocks.media.add).toHaveBeenCalledTimes(1)
-    expect(mocks.ScrollTrigger.batch).toHaveBeenCalledTimes(1)
+    expect(mocks.media.add).toHaveBeenCalledTimes(2)
+    expect(mocks.createTextMotion).toHaveBeenCalledTimes(1)
+    expect(mocks.createTextMotion).toHaveBeenCalledWith(expect.any(HTMLElement))
+    expect(mocks.textMotion.playChapter).toHaveBeenCalledWith('00')
+    expect(mocks.ScrollTrigger.batch).not.toHaveBeenCalled()
     expect(mocks.ScrollTrigger.create).toHaveBeenCalledTimes(5)
     const triggerCalls = mocks.ScrollTrigger.create.mock.calls.map(([config]) => config)
     expect(triggerCalls.map((config) => config.start)).toEqual(Array(5).fill('top 55%'))
@@ -183,6 +208,62 @@ describe('useHomeMotion', () => {
       { progress: 0, chapter: '00' },
       { progress: 0.75, chapter: '03' },
     ])
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('03')
+
+    triggerCalls[0].trigger.dataset.chapter = 'invalid'
+    triggerCalls[0].onEnter()
+    expect(reports).toContainEqual({ progress: 0, chapter: '00' })
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('invalid')
+  })
+
+  it('keeps text playback alive across responsive cleanup and reverts it only with the media context', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+
+    const { wrapper } = mountHarness()
+    await settle()
+    const responsive = mocks.mediaCleanups.find(({ queries }) => typeof queries === 'object')
+    expect(responsive).toBeDefined()
+
+    responsive?.cleanup()
+    expect(mocks.textMotion.revert).not.toHaveBeenCalled()
+
+    const responsiveCallback = mocks.media.add.mock.calls[1][1]
+    responsiveCallback({ conditions: mocks.conditions })
+    const latestTrigger = mocks.ScrollTrigger.create.mock.calls.at(-1)?.[0]
+    latestTrigger?.onEnter()
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('04')
+
+    wrapper.unmount()
+    expect(mocks.textMotion.revert).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses only the signal entrance and connects desktop scroll updates to text playback', async () => {
+    configureGsap({ desktop: true, mobile: false, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const signalTween = { kill: vi.fn() }
+    mocks.gsap.from.mockReturnValue(signalTween)
+    const { reports, wrapper } = mountHarness({ story: true, signal: true })
+    const stage = wrapper.get('[data-story-stage]').element
+    const track = wrapper.get('[data-story-track]').element
+    Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1000 })
+    Object.defineProperty(track, 'scrollWidth', { configurable: true, value: 1600 })
+    await settle()
+
+    expect(mocks.gsap.timeline).not.toHaveBeenCalled()
+    expect(mocks.gsap.from).toHaveBeenCalledWith(
+      wrapper.get('[data-signal-visual]').element,
+      { scale: 0.9, autoAlpha: 0, duration: 0.6, ease: 'power2.out' },
+    )
+    const horizontal = mocks.gsap.to.mock.calls[0][1]
+    horizontal.scrollTrigger.onUpdate({ progress: 0.5 })
+    expect(reports).toContainEqual({ progress: 0.5, chapter: '03' })
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('03')
+
+    const responsive = mocks.mediaCleanups.find(({ queries }) => typeof queries === 'object')
+    responsive?.cleanup()
+    expect(signalTween.kill).toHaveBeenCalledTimes(1)
+    expect(mocks.textMotion.revert).not.toHaveBeenCalled()
   })
 
   it('creates and cleans up the horizontal tween when desktop overflow crosses zero', async () => {

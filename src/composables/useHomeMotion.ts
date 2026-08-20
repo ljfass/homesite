@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
 import { gsap, ScrollTrigger } from '../lib/gsap'
 import { getChapterFromProgress, getHorizontalTravel } from '../lib/motion'
+import { createTextMotion, type TextMotionController } from '../lib/textMotion'
 
 type MotionUpdate = (progress: number, chapter: string) => void
 
@@ -87,6 +88,19 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     }
 
     media = gsap.matchMedia()
+    let textMotion: TextMotionController | undefined
+    media.add(
+      '(prefers-reduced-motion: no-preference)',
+      () => {
+        textMotion = createTextMotion(scope)
+        textMotion.playChapter('00')
+        return () => {
+          textMotion?.revert()
+          textMotion = undefined
+        }
+      },
+      scope,
+    )
     media.add(
       {
         desktop: '(min-width: 768px) and (min-height: 600px)',
@@ -104,22 +118,14 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           return
         }
 
+        let cleanupHorizontal: (() => void) | undefined
+        let signalTween: gsap.core.Tween | undefined
+
         if (desktop) {
-          const lines = scope.querySelectorAll<HTMLElement>('[data-hero-line]')
-          const copy = scope.querySelectorAll<HTMLElement>('[data-hero-copy]')
           const signal = scope.querySelector<HTMLElement>('[data-signal-visual]')
-
-          const entrance = gsap.timeline({
-            defaults: { duration: 0.6, ease: 'power2.out' },
-          })
-
-          entrance
-            .from(lines, { yPercent: 100, autoAlpha: 0, stagger: 0.08 })
-            .from(copy, { yPercent: 36, autoAlpha: 0, stagger: 0.06 }, '<0.12')
-
-          if (signal) {
-            entrance.from(signal, { scale: 0.9, autoAlpha: 0 }, '<0.1')
-          }
+          signalTween = signal
+            ? gsap.from(signal, { scale: 0.9, autoAlpha: 0, duration: 0.6, ease: 'power2.out' })
+            : undefined
 
           const stage = scope.querySelector<HTMLElement>('[data-story-stage]')
           const track = scope.querySelector<HTMLElement>('[data-story-track]')
@@ -158,7 +164,9 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
                     invalidateOnRefresh: true,
                     anticipatePin: 1,
                     onUpdate: (self) => {
-                      onMotionUpdate(self.progress, getChapterFromProgress(self.progress))
+                      const chapter = getChapterFromProgress(self.progress)
+                      onMotionUpdate(self.progress, chapter)
+                      textMotion?.playChapter(chapter)
                     },
                   },
                 })
@@ -183,7 +191,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
               resizeObserver.observe(track)
             }
 
-            return () => {
+            cleanupHorizontal = () => {
               if (resizeFrame !== undefined) {
                 cancelAnimationFrame(resizeFrame)
               }
@@ -196,28 +204,14 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
         }
 
         if (mobile) {
-          const panels = scope.querySelectorAll<HTMLElement>('[data-story-panel]')
           const chapters = scope.querySelectorAll<HTMLElement>('[data-chapter]')
 
-          if (panels.length > 0) {
-            ScrollTrigger.batch(panels, {
-              start: 'top 82%',
-              once: true,
-              onEnter: (elements) => {
-                gsap.from(elements, {
-                  y: 32,
-                  autoAlpha: 0,
-                  stagger: 0.06,
-                  duration: 0.45,
-                  ease: 'power2.out',
-                  overwrite: 'auto',
-                })
-              },
-            })
-          }
-
           chapters.forEach((section) => {
-            const updateChapter = () => reportMobileChapter(section.dataset.chapter, onMotionUpdate)
+            const updateChapter = () => {
+              const chapter = section.dataset.chapter
+              reportMobileChapter(chapter, onMotionUpdate)
+              if (chapter) textMotion?.playChapter(chapter)
+            }
 
             ScrollTrigger.create({
               trigger: section,
@@ -229,6 +223,10 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           })
         }
 
+        return () => {
+          cleanupHorizontal?.()
+          signalTween?.kill()
+        }
       },
       scope,
     )
