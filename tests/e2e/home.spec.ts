@@ -31,6 +31,19 @@ async function openHomepage(page: Page): Promise<void> {
     .toBe(true)
 }
 
+async function expectTextMotionSettled(page: Page, chapter: string): Promise<void> {
+  const section = page.locator(`[data-chapter="${chapter}"]`)
+  const label = section.locator('[data-text-label]')
+  const staticLabel = section.locator('[data-text-static="label"]')
+  await expect(label).toHaveText((await staticLabel.textContent()) ?? '')
+
+  const command = section.locator('[data-text-command]')
+  if ((await command.count()) > 0) {
+    const staticCommand = section.locator('[data-text-static="command"]')
+    await expect(command).toHaveText((await staticCommand.textContent()) ?? '', { timeout: 8_000 })
+  }
+}
+
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => {
     const viewportWidth = document.documentElement.clientWidth
@@ -88,6 +101,7 @@ async function reachEveryChapter(page: Page): Promise<void> {
     const chapter = chapters.nth(index)
     await chapter.evaluate((section) => section.scrollIntoView({ block: 'center' }))
     await expect(chapter).toBeInViewport({ ratio: 0.1 })
+    await expectTextMotionSettled(page, (await chapter.getAttribute('data-chapter')) ?? '')
   }
 }
 
@@ -212,6 +226,8 @@ async function releaseAnimationFrames(page: Page): Promise<void> {
 test('desktop renders the hero and drives the horizontal story from scroll', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'desktop-only behavior')
   await openHomepage(page)
+  await expectTextMotionSettled(page, '00')
+  await expect(page.locator('[data-chapter="00"] .text-motion-line-mask')).not.toHaveCount(0)
 
   await expect(page).toHaveTitle('Hello World')
   const signal = page.locator('[data-signal-visual]')
@@ -271,6 +287,7 @@ test('desktop renders the hero and drives the horizontal story from scroll', asy
     .poll(() => progress.getAttribute('aria-valuenow').then((value) => Number(value)), { timeout: 8_000 })
     .toBeGreaterThanOrEqual(99)
   await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')
+  await expectTextMotionSettled(page, '04')
 
   const ending = page.getByRole('heading', { level: 2, name: /To be\s+continued\./ })
   await expect(ending).toBeVisible()
@@ -317,6 +334,41 @@ test('mobile keeps every chapter in a readable vertical flow', async ({ page }, 
   test.skip(testInfo.project.name !== 'mobile', 'mobile-only behavior')
   await openHomepage(page)
   await expectVerticalFallback(page)
+
+  const firstChapter = page.locator('[data-chapter="01"]')
+  await firstChapter.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expectTextMotionSettled(page, '01')
+
+  await page.evaluate(() => {
+    const command = document.querySelector('[data-chapter="01"] [data-text-command]')
+    const runtimeWindow = window as Window & {
+      __chapterReplayMutations?: number
+      __chapterReplayObserver?: MutationObserver
+    }
+    runtimeWindow.__chapterReplayMutations = 0
+    runtimeWindow.__chapterReplayObserver = new MutationObserver((records) => {
+      runtimeWindow.__chapterReplayMutations = (runtimeWindow.__chapterReplayMutations ?? 0) + records.length
+    })
+    if (command) {
+      runtimeWindow.__chapterReplayObserver.observe(command, { childList: true, characterData: true, subtree: true })
+    }
+  })
+
+  await page.locator('[data-chapter="03"]').evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expectTextMotionSettled(page, '03')
+  await firstChapter.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await page.waitForTimeout(900)
+
+  const replayMutations = await page.evaluate(() => {
+    const runtimeWindow = window as Window & {
+      __chapterReplayMutations?: number
+      __chapterReplayObserver?: MutationObserver
+    }
+    runtimeWindow.__chapterReplayObserver?.disconnect()
+    return runtimeWindow.__chapterReplayMutations ?? 0
+  })
+  expect(replayMutations, 'a viewed chapter must not decode again').toBe(0)
+
   await reachEveryChapter(page)
 
   const laterChapter = page.locator('[data-chapter="03"]')
@@ -554,6 +606,10 @@ test('reduced motion removes pinning and uses an instant back-to-top action', as
   await openHomepage(page)
   await expectVerticalFallback(page)
   await reachEveryChapter(page)
+  await expect(page.locator('.text-motion-line, .text-motion-line-mask')).toHaveCount(0)
+  for (const chapter of ['00', '01', '02', '03', '04']) {
+    await expectTextMotionSettled(page, chapter)
+  }
   await expect(page.getByRole('heading', { level: 2, name: /To be\s+continued\./ })).toBeVisible()
 
   await page.evaluate(() => {
