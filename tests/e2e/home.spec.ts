@@ -160,6 +160,55 @@ async function waitForAnimationFrames(page: Page, count = 2): Promise<void> {
   )
 }
 
+type HeldAnimationFrames = Window & {
+  __homeMotionHeldFrames?: Map<number, FrameRequestCallback>
+  __homeMotionOriginalCancelFrame?: typeof cancelAnimationFrame
+  __homeMotionOriginalRequestFrame?: typeof requestAnimationFrame
+}
+
+async function holdAnimationFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const runtimeWindow = window as HeldAnimationFrames
+    const heldFrames = new Map<number, FrameRequestCallback>()
+    const originalRequestFrame = window.requestAnimationFrame.bind(window)
+    const originalCancelFrame = window.cancelAnimationFrame.bind(window)
+    let heldFrameId = 1_000_000
+
+    runtimeWindow.__homeMotionHeldFrames = heldFrames
+    runtimeWindow.__homeMotionOriginalRequestFrame = originalRequestFrame
+    runtimeWindow.__homeMotionOriginalCancelFrame = originalCancelFrame
+    window.requestAnimationFrame = (callback) => {
+      heldFrameId += 1
+      heldFrames.set(heldFrameId, callback)
+      return heldFrameId
+    }
+    window.cancelAnimationFrame = (frameId) => {
+      if (!heldFrames.delete(frameId)) {
+        originalCancelFrame(frameId)
+      }
+    }
+  })
+}
+
+async function releaseAnimationFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const runtimeWindow = window as HeldAnimationFrames
+    const heldFrames = [...(runtimeWindow.__homeMotionHeldFrames?.values() ?? [])]
+    const originalRequestFrame = runtimeWindow.__homeMotionOriginalRequestFrame
+    const originalCancelFrame = runtimeWindow.__homeMotionOriginalCancelFrame
+    if (!originalRequestFrame || !originalCancelFrame) {
+      throw new Error('animation frames were not held')
+    }
+
+    window.requestAnimationFrame = originalRequestFrame
+    window.cancelAnimationFrame = originalCancelFrame
+    delete runtimeWindow.__homeMotionHeldFrames
+    delete runtimeWindow.__homeMotionOriginalRequestFrame
+    delete runtimeWindow.__homeMotionOriginalCancelFrame
+    heldFrames.forEach((callback) => originalRequestFrame(callback))
+  })
+}
+
 test('desktop renders the hero and drives the horizontal story from scroll', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'desktop-only behavior')
   await openHomepage(page)
@@ -302,6 +351,7 @@ test('mobile preserves the active chapter when runtime motion preferences change
   const chapterEntryScrollY = await page.evaluate(() => window.scrollY)
   await page.evaluate(() => window.scrollBy({ top: 160, behavior: 'instant' }))
   await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 8_000 }).toBeGreaterThan(chapterEntryScrollY + 120)
+  await waitForAnimationFrames(page)
   const readingPosition = await chapter.evaluate((section) => ({
     scrollY: window.scrollY,
     chapterTop: section.getBoundingClientRect().top,
@@ -355,11 +405,18 @@ test('reduced motion keeps semantic chapter tracking before text motion returns'
   await chapter03.evaluate((section) => section.scrollIntoView({ block: 'center' }))
   await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
 
+  await holdAnimationFrames(page)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect(page.locator('.text-motion-line')).toHaveCount(0)
-  await chapter04.evaluate((section) => section.scrollIntoView({ block: 'center' }))
-  await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')
+  const deltaToChapter04 = await chapter04.evaluate(
+    (section) => section.getBoundingClientRect().top - window.innerHeight * 0.5,
+  )
+  await page.mouse.move(195, 422)
+  await page.mouse.wheel(0, Math.max(1, deltaToChapter04))
   await expectChapterInViewport(page, '04')
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await releaseAnimationFrames(page)
+  await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')
 
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')

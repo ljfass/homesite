@@ -62,6 +62,8 @@ GSAP may emit more than one global match-media cycle for one browser change beca
 
 After the replacement responsive context exists, refresh ScrollTrigger, restore either the exact horizontal progress or the saved vertical anchor without CSS smooth scrolling, resynchronize header progress, and make the saved chapter the newly active text controller's first playback. Horizontal frames retain the last compact/static anchor offset instead of measuring pinned panel geometry, allowing a mobile-to-desktop-to-mobile round trip to restore the same within-chapter offset. The same post-refresh resynchronization applies to desktop/mobile breakpoint changes. A default chapter `00`, reduced-motion placeholder, cleanup report, or trigger emitted while contexts are rebuilding must not update the header or drive text playback.
 
+A reader may scroll during the short guarded rebuild window. Capture-phase wheel, touch-move, and scrolling-key input (`ArrowUp`, `ArrowDown`, `PageUp`, `PageDown`, `Home`, `End`, and `Space`) mark genuine reading intent only while a transition or restoration is pending. Capture phase is required because ScrollTrigger's earlier window listener may synchronously report the new chapter from the same input event. A semantic trigger from the current responsive generation with matching live media conditions may then cache a pending user snapshot without immediately changing the header or playing text. The winning restoration token freezes the intent latch before refreshing ScrollTrigger, so refresh-generated reports cannot overwrite the user snapshot. Restoration prefers that pending snapshot, clears it atomically with the transition state, and otherwise retains the original locked snapshot and exact offset. Scroll events alone never establish user intent, so ScrollTrigger teardown, refresh, programmatic restoration, stale generations, and synthetic layout shifts cannot replace canonical state.
+
 ## Motion Values
 
 - Title reveal duration: approximately `0.7s`.
@@ -110,6 +112,7 @@ The module does not own Vue lifecycle hooks or ScrollTrigger positioning.
 - Avoid creating the text-motion module inside the reduced-motion branch.
 - Revert text motion through the existing match-media and component cleanup paths.
 - Maintain stable reading state and its chapter anchor while the active context remains valid. Runtime preference and breakpoint changes restore that state after GSAP's post-match refresh; pending native media, scroll, animation-frame, and GSAP event listeners are removed on unmount.
+- Preserve real wheel, touch-move, and scrolling-key intent during the guarded rebuild by caching only a matching current-generation trigger snapshot; never report or play it before restoration unlocks.
 - Cache chapter elements once after assets settle and coalesce scroll-driven anchor measurements to one animation frame.
 
 Text motion must not add another horizontal container animation or alter the main track tween.

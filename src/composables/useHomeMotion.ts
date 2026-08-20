@@ -38,6 +38,7 @@ const assetTimeoutMs = 4_000
 const desktopMediaQuery = '(min-width: 768px) and (min-height: 600px)'
 const mobileMediaQuery = '(max-width: 767px), (max-height: 599px)'
 const reduceMotionMediaQuery = '(prefers-reduced-motion: reduce)'
+const scrollIntentKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Spacebar'])
 
 function waitForImage(image: HTMLImageElement, { signal, timeoutMs }: Required<RootAssetWaitOptions>): Promise<void> {
   return new Promise((resolve) => {
@@ -115,6 +116,8 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
   let matchMediaInitListener: (() => void) | undefined
   let matchMediaListener: (() => void) | undefined
   let scrollPositionListener: (() => void) | undefined
+  let userScrollIntentListener: (() => void) | undefined
+  let userScrollKeyListener: ((event: KeyboardEvent) => void) | undefined
   let readingPositionFrame: number | undefined
   let restorationFrame: number | undefined
   let restorationToken = 0
@@ -124,8 +127,10 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
   let lastReadingAnchorOffset = 0
   let lastStableSnapshot: ReadingSnapshot | undefined
   let mediaChangeSnapshot: ReadingSnapshot | undefined
+  let pendingUserSnapshot: ReadingSnapshot | undefined
   let matchMediaTransitionActive = false
   let preferenceRestorationPending = false
+  let transitionUserScrollIntent = false
   let disposed = false
 
   onMounted(async () => {
@@ -231,12 +236,26 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       chapter: string,
       horizontalProgress?: number,
     ) => {
-      if (
-        disposed ||
-        matchMediaTransitionActive ||
-        preferenceRestorationPending ||
-        !isResponsiveContextCurrent(generation)
-      ) {
+      if (disposed || !isResponsiveContextCurrent(generation)) {
+        return
+      }
+
+      if (matchMediaTransitionActive || preferenceRestorationPending) {
+        if (transitionUserScrollIntent) {
+          const anchor = chapterElements.get(chapter)
+          pendingUserSnapshot = {
+            progress,
+            chapter,
+            horizontalProgress,
+            mode: activeMotionMode,
+            anchor,
+            anchorOffset:
+              activeMotionMode !== 'horizontal' && anchor?.isConnected
+                ? anchor.getBoundingClientRect().top
+                : lastReadingAnchorOffset,
+            scrollY: window.scrollY,
+          }
+        }
         return
       }
 
@@ -263,8 +282,9 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
             return
           }
 
+          transitionUserScrollIntent = false
           ScrollTrigger.refresh()
-          const snapshot = mediaChangeSnapshot ?? lastStableSnapshot ?? createReadingSnapshot()
+          const snapshot = pendingUserSnapshot ?? mediaChangeSnapshot ?? lastStableSnapshot ?? createReadingSnapshot()
           const horizontalProgress =
             snapshot.horizontalProgress ??
             (snapshot.mode === 'horizontal'
@@ -303,6 +323,8 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           matchMediaTransitionActive = false
           preferenceRestorationPending = false
           mediaChangeSnapshot = undefined
+          pendingUserSnapshot = undefined
+          transitionUserScrollIntent = false
           commitStableSnapshot()
           scheduleReadingPositionCapture()
         })
@@ -481,6 +503,19 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     matchMediaEvents.addEventListener('matchMedia', matchMediaListener)
     reducedMotionListener = scheduleReadingRestoration
     reducedMotionMedia.addEventListener('change', reducedMotionListener)
+    userScrollIntentListener = () => {
+      if (matchMediaTransitionActive || preferenceRestorationPending) {
+        transitionUserScrollIntent = true
+      }
+    }
+    userScrollKeyListener = (event) => {
+      if (scrollIntentKeys.has(event.key) || event.code === 'Space') {
+        userScrollIntentListener?.()
+      }
+    }
+    window.addEventListener('wheel', userScrollIntentListener, { passive: true, capture: true })
+    window.addEventListener('touchmove', userScrollIntentListener, { passive: true, capture: true })
+    window.addEventListener('keydown', userScrollKeyListener, true)
   })
 
   onBeforeUnmount(() => {
@@ -496,6 +531,13 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     if (scrollPositionListener) {
       window.removeEventListener('scroll', scrollPositionListener)
     }
+    if (userScrollIntentListener) {
+      window.removeEventListener('wheel', userScrollIntentListener, true)
+      window.removeEventListener('touchmove', userScrollIntentListener, true)
+    }
+    if (userScrollKeyListener) {
+      window.removeEventListener('keydown', userScrollKeyListener, true)
+    }
     if (reducedMotionMedia && reducedMotionListener) {
       reducedMotionMedia.removeEventListener('change', reducedMotionListener)
     }
@@ -505,6 +547,8 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     if (matchMediaListener) {
       matchMediaEvents.removeEventListener('matchMedia', matchMediaListener)
     }
+    pendingUserSnapshot = undefined
+    transitionUserScrollIntent = false
     media?.revert()
   })
 }
