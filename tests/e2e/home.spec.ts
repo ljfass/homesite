@@ -143,6 +143,23 @@ async function getTrackX(page: Page): Promise<number> {
   })
 }
 
+async function waitForAnimationFrames(page: Page, count = 2): Promise<void> {
+  await page.evaluate(
+    (frameCount) =>
+      new Promise<void>((resolve) => {
+        const advance = (remaining: number) => {
+          if (remaining <= 0) {
+            resolve()
+            return
+          }
+          requestAnimationFrame(() => advance(remaining - 1))
+        }
+        advance(frameCount)
+      }),
+    count,
+  )
+}
+
 test('desktop renders the hero and drives the horizontal story from scroll', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'desktop-only behavior')
   await openHomepage(page)
@@ -233,6 +250,8 @@ test('desktop preserves horizontal progress through a runtime preference round t
   await expectVerticalFallback(page)
   await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
   await expectChapterInViewport(page, '03')
+  await waitForAnimationFrames(page)
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
 
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await expect(page.locator('.pin-spacer')).toHaveCount(1)
@@ -356,18 +375,41 @@ test('responsive rebuilds retain chapter 03 across mobile and desktop layouts', 
   await chapter.evaluate((section) => section.scrollIntoView({ block: 'center' }))
   await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
   await expectChapterTextVisible(page, '03')
+  await page.evaluate(() => window.scrollBy({ top: 160, behavior: 'instant' }))
+  await waitForAnimationFrames(page)
+  const compactReadingPosition = await chapter.evaluate((section) => ({
+    scrollY: window.scrollY,
+    chapterTop: section.getBoundingClientRect().top,
+  }))
 
   await page.setViewportSize({ width: 1_440, height: 900 })
   await expect(page.locator('.pin-spacer')).toHaveCount(1)
   await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
   await expectChapterInViewport(page, '03')
   await expectChapterTextVisible(page, '03')
+  await waitForAnimationFrames(page)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expectVerticalFallback(page)
   await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
   await expectChapterInViewport(page, '03')
   await expectChapterTextVisible(page, '03')
+  await expect
+    .poll(
+      () =>
+        chapter.evaluate(
+          (section, baseline) => Math.abs(section.getBoundingClientRect().top - baseline),
+          compactReadingPosition.chapterTop,
+        ),
+      { timeout: 8_000 },
+    )
+    .toBeLessThan(4)
+  await expect
+    .poll(
+      () => page.evaluate((baseline) => Math.abs(window.scrollY - baseline), compactReadingPosition.scrollY),
+      { timeout: 8_000 },
+    )
+    .toBeLessThan(4)
 })
 
 test('short landscape uses compact vertical layout without clipped content', async ({ page }, testInfo) => {

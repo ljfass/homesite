@@ -18,12 +18,25 @@ const mocks = vi.hoisted(() => {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
   }
+  const desktopMotionMedia = {
+    ...reducedMotionMedia,
+    matches: false,
+    media: '(min-width: 768px) and (min-height: 600px)',
+  }
+  const mobileMotionMedia = {
+    ...reducedMotionMedia,
+    matches: false,
+    media: '(max-width: 767px), (max-height: 599px)',
+  }
 
   return {
     media,
+    desktopMotionMedia,
+    mobileMotionMedia,
     reducedMotionMedia,
     reducedMotionListeners,
     conditions: {} as Record<string, boolean>,
+    liveConditions: {} as Record<string, boolean>,
     textMotion: { playChapter: vi.fn(), revert: vi.fn() },
     createTextMotion: vi.fn(),
     gsap: {
@@ -109,8 +122,11 @@ function setFontsReady(ready: Promise<void>): void {
 
 function configureGsap(conditions: Record<string, boolean>): void {
   mocks.conditions = conditions
+  mocks.liveConditions = { ...conditions }
   mocks.mediaCleanups = []
   mocks.reducedMotionListeners.clear()
+  mocks.desktopMotionMedia.matches = conditions.desktop
+  mocks.mobileMotionMedia.matches = conditions.mobile
   mocks.reducedMotionMedia.matches = conditions.reduceMotion
   mocks.reducedMotionMedia.addEventListener.mockReset().mockImplementation((type, listener) => {
     if (type === 'change') {
@@ -122,7 +138,15 @@ function configureGsap(conditions: Record<string, boolean>): void {
       mocks.reducedMotionListeners.delete(listener)
     }
   })
-  vi.stubGlobal('matchMedia', vi.fn(() => mocks.reducedMotionMedia))
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => {
+    if (query === mocks.desktopMotionMedia.media) {
+      return mocks.desktopMotionMedia
+    }
+    if (query === mocks.mobileMotionMedia.media) {
+      return mocks.mobileMotionMedia
+    }
+    return mocks.reducedMotionMedia
+  }))
   mocks.media.add.mockReset().mockImplementation((queries, callback, scope) => {
     const isTextMedia = queries === '(prefers-reduced-motion: no-preference)'
     if (isTextMedia && mocks.conditions.reduceMotion) {
@@ -231,6 +255,7 @@ function activateResponsiveContext(): void {
 }
 
 function emitReducedMotionChange(matches: boolean): void {
+  mocks.liveConditions.reduceMotion = matches
   mocks.reducedMotionMedia.matches = matches
   const event = { matches, media: mocks.reducedMotionMedia.media } as MediaQueryListEvent
   mocks.reducedMotionListeners.forEach((listener) => listener(event))
@@ -244,8 +269,13 @@ function emitGsapMatchMedia(): void {
   mocks.matchMediaListener?.()
 }
 
-function runMatchMediaCycle(nextConditions: Record<string, boolean>): void {
+function runMatchMediaCycle(nextConditions: Record<string, boolean>, beforeInit?: () => void): void {
   const reducedMotionChanged = mocks.conditions.reduceMotion !== nextConditions.reduceMotion
+  mocks.liveConditions = { ...nextConditions }
+  mocks.desktopMotionMedia.matches = nextConditions.desktop
+  mocks.mobileMotionMedia.matches = nextConditions.mobile
+  mocks.reducedMotionMedia.matches = nextConditions.reduceMotion
+  beforeInit?.()
   emitGsapMatchMediaInit()
 
   if (reducedMotionChanged) {
@@ -459,6 +489,7 @@ describe('useHomeMotion', () => {
     anchorTop = -60
     window.scrollY = 820
     window.dispatchEvent(new Event('scroll'))
+    frames.runAll()
 
     emitReducedMotionChange(true)
     runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
@@ -500,6 +531,7 @@ describe('useHomeMotion', () => {
     const { reports, wrapper } = mountHarness()
     await settle()
     mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+    runNextFrame()
     expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
 
     emitGsapMatchMediaInit()
@@ -564,13 +596,22 @@ describe('useHomeMotion', () => {
     Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1_000 })
     Object.defineProperty(track, 'scrollWidth', { configurable: true, value: 1_600 })
     await settle()
-    mocks.gsap.to.mock.calls[0][1].scrollTrigger.onUpdate({ progress: 0.55 })
+    const oldHorizontalUpdate = mocks.gsap.to.mock.calls[0][1].scrollTrigger.onUpdate
+    oldHorizontalUpdate({ progress: 0.55 })
+    frames.runAll()
 
-    runMatchMediaCycle({ desktop: true, mobile: false, reduceMotion: true })
+    runMatchMediaCycle(
+      { desktop: true, mobile: false, reduceMotion: true },
+      () => oldHorizontalUpdate({ progress: 0.375 }),
+    )
     frames.runNext()
     runNoopMatchMediaCycle()
     frames.runAll()
-    runMatchMediaCycle({ desktop: true, mobile: false, reduceMotion: false })
+    const staleReducedUpdate = mocks.ScrollTrigger.create.mock.calls[2][0].onEnter
+    runMatchMediaCycle(
+      { desktop: true, mobile: false, reduceMotion: false },
+      staleReducedUpdate,
+    )
     frames.runNext()
     runNoopMatchMediaCycle()
     frames.runAll()
@@ -579,6 +620,9 @@ describe('useHomeMotion', () => {
     expect(scrollBehaviors.at(-1)).toBe('auto')
     expect(document.documentElement.style.scrollBehavior).toBe('smooth')
     expect(reports.at(-1)).toEqual({ progress: 0.55, chapter: '03' })
+    expect(reports).not.toContainEqual({ progress: 0.375, chapter: '02' })
+    expect(reports).not.toContainEqual({ progress: 0.5, chapter: '02' })
+    expect(firstController.playChapter).not.toHaveBeenCalledWith('02')
     expect(replacementController.playChapter).toHaveBeenCalledExactlyOnceWith('03')
     wrapper.unmount()
   })
@@ -600,6 +644,7 @@ describe('useHomeMotion', () => {
     frames.runAll()
     expect(mocks.ScrollTrigger.create).toHaveBeenCalledTimes(10)
     mocks.ScrollTrigger.create.mock.calls[9][0].onEnter()
+    frames.runAll()
     expect(reports.at(-1)).toEqual({ progress: 1, chapter: '04' })
 
     runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: false })
@@ -613,7 +658,11 @@ describe('useHomeMotion', () => {
     configureGsap({ desktop: false, mobile: true, reduceMotion: false })
     setFontsReady(Promise.resolve())
     const frames = stubAnimationFrames()
-    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((optionsOrX) => {
+      const { top } = optionsOrX as unknown as ScrollToOptions
+      window.scrollY = top ?? window.scrollY
+    })
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 2_042.7, writable: true })
     const desktopTween = {
       kill: vi.fn(),
       scrollTrigger: { start: 1_000, end: 1_600, progress: 0 },
@@ -626,23 +675,41 @@ describe('useHomeMotion', () => {
     Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1_000 })
     Object.defineProperty(track, 'scrollWidth', { configurable: true, value: 1_600 })
     await settle()
-    mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+    const chapter03 = mocks.ScrollTrigger.create.mock.calls[3][0]
+    let layout: 'mobile' | 'desktop' = 'mobile'
+    vi.spyOn(chapter03.trigger, 'getBoundingClientRect').mockImplementation(() =>
+      DOMRect.fromRect({ y: layout === 'mobile' ? 2_000 - window.scrollY : 0 }),
+    )
+    chapter03.onEnter()
+    window.dispatchEvent(new Event('scroll'))
+    frames.runAll()
 
-    runMatchMediaCycle({ desktop: true, mobile: false, reduceMotion: false })
+    runMatchMediaCycle(
+      { desktop: true, mobile: false, reduceMotion: false },
+      () => {
+        layout = 'desktop'
+      },
+    )
     frames.runNext()
     runNoopMatchMediaCycle()
     frames.runAll()
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 1_375, behavior: 'auto' })
     expect(reports.at(-1)).toEqual({ progress: 0.625, chapter: '03' })
 
-    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: false })
+    runMatchMediaCycle(
+      { desktop: false, mobile: true, reduceMotion: false },
+      () => {
+        layout = 'mobile'
+      },
+    )
     frames.runAll()
     expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
     expect(scrollTo).toHaveBeenCalledTimes(2)
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 2_042.7, behavior: 'auto' })
     wrapper.unmount()
   })
 
-  it('caches chapter elements and throttles repeated desktop anchor sampling', async () => {
+  it('caches chapter elements and avoids horizontal anchor layout reads', async () => {
     configureGsap({ desktop: true, mobile: false, reduceMotion: false })
     const fonts = deferred<void>()
     setFontsReady(fonts.promise)
@@ -670,7 +737,7 @@ describe('useHomeMotion', () => {
     expect(readChapterRect).not.toHaveBeenCalled()
     expect(frames.pending()).toBe(1)
     frames.runNext()
-    expect(readChapterRect).toHaveBeenCalledTimes(1)
+    expect(readChapterRect).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

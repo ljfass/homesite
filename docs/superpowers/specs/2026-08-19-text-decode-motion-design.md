@@ -58,7 +58,9 @@ When `prefers-reduced-motion: reduce` is active:
 
 When this preference changes while the page is open, preserve the reader's canonical chapter and viewport position. Stable scroll events keep the active chapter's viewport offset current, while teardown-generated scroll events are ignored after a match-media transition begins. On desktop, retain the last stable horizontal ScrollTrigger progress so a preference round trip returns to the same point inside the chapter. Reduced mode keeps lightweight, non-animating chapter triggers so scrolling to another chapter updates the semantic reading state before text motion returns.
 
-GSAP may emit more than one global match-media cycle for one browser change because several media-query listeners toggle together. Lock the first stable snapshot across the full rebuild, including no-op follow-up cycles. After the replacement responsive context exists, refresh ScrollTrigger, restore either the exact horizontal progress or the saved vertical anchor without CSS smooth scrolling, resynchronize header progress, and make the saved chapter the newly active text controller's first playback. The same post-refresh resynchronization applies to desktop/mobile breakpoint changes. A default chapter `00`, reduced-motion placeholder, cleanup report, or trigger emitted while contexts are rebuilding must not update the header or drive text playback.
+GSAP may emit more than one global match-media cycle for one browser change because several media-query listeners toggle together. Maintain a last-stable snapshot during valid responsive frames and lock that snapshot across the full rebuild, including no-op follow-up cycles. ScrollTrigger's own global init listener runs first and may revert triggers after the browser media state and CSS have already changed, so the homepage init listener must not sample layout there. Reports from an old responsive context are accepted only while both its generation and live media conditions still match.
+
+After the replacement responsive context exists, refresh ScrollTrigger, restore either the exact horizontal progress or the saved vertical anchor without CSS smooth scrolling, resynchronize header progress, and make the saved chapter the newly active text controller's first playback. Horizontal frames retain the last compact/static anchor offset instead of measuring pinned panel geometry, allowing a mobile-to-desktop-to-mobile round trip to restore the same within-chapter offset. The same post-refresh resynchronization applies to desktop/mobile breakpoint changes. A default chapter `00`, reduced-motion placeholder, cleanup report, or trigger emitted while contexts are rebuilding must not update the header or drive text playback.
 
 ## Motion Values
 
@@ -107,7 +109,7 @@ The module does not own Vue lifecycle hooks or ScrollTrigger positioning.
 - Invoke `playChapter()` from the existing compact chapter triggers.
 - Avoid creating the text-motion module inside the reduced-motion branch.
 - Revert text motion through the existing match-media and component cleanup paths.
-- Capture real reading state and its chapter anchor before match-media contexts revert. Runtime preference changes restore that state after GSAP's post-match refresh; pending native media, scroll, animation-frame, and GSAP event listeners are removed on unmount.
+- Maintain stable reading state and its chapter anchor while the active context remains valid. Runtime preference and breakpoint changes restore that state after GSAP's post-match refresh; pending native media, scroll, animation-frame, and GSAP event listeners are removed on unmount.
 - Cache chapter elements once after assets settle and coalesce scroll-driven anchor measurements to one animation frame.
 
 Text motion must not add another horizontal container animation or alter the main track tween.

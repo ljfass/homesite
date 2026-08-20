@@ -15,6 +15,13 @@ type ReadingSnapshot = ReadingState & {
   mode: MotionMode
   anchor?: HTMLElement
   anchorOffset: number
+  scrollY: number
+}
+
+type ResponsiveConditions = {
+  desktop: boolean
+  mobile: boolean
+  reduceMotion: boolean
 }
 
 type MatchMediaEventSource = {
@@ -28,6 +35,9 @@ type RootAssetWaitOptions = {
 }
 
 const assetTimeoutMs = 4_000
+const desktopMediaQuery = '(min-width: 768px) and (min-height: 600px)'
+const mobileMediaQuery = '(max-width: 767px), (max-height: 599px)'
+const reduceMotionMediaQuery = '(prefers-reduced-motion: reduce)'
 
 function waitForImage(image: HTMLImageElement, { signal, timeoutMs }: Required<RootAssetWaitOptions>): Promise<void> {
   return new Promise((resolve) => {
@@ -112,6 +122,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
   let lastReadingState: ReadingState = { progress: 0, chapter: '00' }
   let lastReadingAnchor: HTMLElement | undefined
   let lastReadingAnchorOffset = 0
+  let lastStableSnapshot: ReadingSnapshot | undefined
   let mediaChangeSnapshot: ReadingSnapshot | undefined
   let matchMediaTransitionActive = false
   let preferenceRestorationPending = false
@@ -124,15 +135,49 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     }
 
     const chapterElements = new Map<string, HTMLElement>()
-    const captureReadingPosition = (force = false) => {
-      if (!force && (matchMediaTransitionActive || preferenceRestorationPending)) {
+    let activeMotionMode: MotionMode = 'vertical'
+    let responsiveGeneration = 0
+    let activeResponsiveGeneration = 0
+    let activeResponsiveConditions: ResponsiveConditions | undefined
+    let desktopMotionMedia: MediaQueryList | undefined
+    let mobileMotionMedia: MediaQueryList | undefined
+    const isResponsiveContextCurrent = (generation = activeResponsiveGeneration) => {
+      const conditions = activeResponsiveConditions
+      return Boolean(
+        generation > 0 &&
+        generation === activeResponsiveGeneration &&
+        conditions &&
+        desktopMotionMedia?.matches === conditions.desktop &&
+        mobileMotionMedia?.matches === conditions.mobile &&
+        reducedMotionMedia?.matches === conditions.reduceMotion,
+      )
+    }
+    const createReadingSnapshot = (): ReadingSnapshot => ({
+      progress: lastReadingState.progress,
+      chapter: lastReadingState.chapter,
+      horizontalProgress: lastReadingState.horizontalProgress,
+      mode: activeMotionMode,
+      anchor: lastReadingAnchor,
+      anchorOffset: lastReadingAnchorOffset,
+      scrollY: savedScrollY,
+    })
+    const commitStableSnapshot = () => {
+      lastStableSnapshot = createReadingSnapshot()
+    }
+    const captureReadingPosition = () => {
+      if (
+        matchMediaTransitionActive ||
+        preferenceRestorationPending ||
+        !isResponsiveContextCurrent()
+      ) {
         return
       }
 
       savedScrollY = window.scrollY
-      if (lastReadingAnchor?.isConnected) {
+      if (activeMotionMode !== 'horizontal' && lastReadingAnchor?.isConnected) {
         lastReadingAnchorOffset = lastReadingAnchor.getBoundingClientRect().top
       }
+      commitStableSnapshot()
     }
     const scheduleReadingPositionCapture = () => {
       if (matchMediaTransitionActive || preferenceRestorationPending || readingPositionFrame !== undefined) {
@@ -144,12 +189,11 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
         captureReadingPosition()
       })
     }
-    const flushReadingPosition = () => {
+    const cancelReadingPositionCapture = () => {
       if (readingPositionFrame !== undefined) {
         cancelAnimationFrame(readingPositionFrame)
         readingPositionFrame = undefined
       }
-      captureReadingPosition(true)
     }
 
     savedScrollY = window.scrollY
@@ -172,14 +216,27 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       }
     })
     lastReadingAnchor = chapterElements.get('00')
-    captureReadingPosition()
+    savedScrollY = window.scrollY
+    lastReadingAnchorOffset = lastReadingAnchor?.getBoundingClientRect().top ?? 0
+    desktopMotionMedia = window.matchMedia(desktopMediaQuery)
+    mobileMotionMedia = window.matchMedia(mobileMediaQuery)
+    reducedMotionMedia = window.matchMedia(reduceMotionMediaQuery)
 
     media = gsap.matchMedia()
     let textMotion: TextMotionController | undefined
-    let activeMotionMode: MotionMode = 'vertical'
     let activeHorizontalTween: gsap.core.Tween | undefined
-    const reportReadingState = (progress: number, chapter: string, horizontalProgress?: number) => {
-      if (disposed || matchMediaTransitionActive || preferenceRestorationPending) {
+    const reportReadingState = (
+      generation: number,
+      progress: number,
+      chapter: string,
+      horizontalProgress?: number,
+    ) => {
+      if (
+        disposed ||
+        matchMediaTransitionActive ||
+        preferenceRestorationPending ||
+        !isResponsiveContextCurrent(generation)
+      ) {
         return
       }
 
@@ -187,20 +244,10 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       lastReadingState = { progress, chapter, horizontalProgress }
       if (chapterChanged) {
         lastReadingAnchor = chapterElements.get(chapter)
-        scheduleReadingPositionCapture()
       }
+      scheduleReadingPositionCapture()
       onMotionUpdate(progress, chapter)
       textMotion?.playChapter(chapter)
-    }
-    const createReadingSnapshot = (): ReadingSnapshot => {
-      return {
-        progress: lastReadingState.progress,
-        chapter: lastReadingState.chapter,
-        horizontalProgress: lastReadingState.horizontalProgress,
-        mode: activeMotionMode,
-        anchor: lastReadingAnchor,
-        anchorOffset: lastReadingAnchorOffset,
-      }
     }
     const scheduleReadingRestoration = () => {
       preferenceRestorationPending = true
@@ -217,7 +264,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           }
 
           ScrollTrigger.refresh()
-          const snapshot = mediaChangeSnapshot ?? createReadingSnapshot()
+          const snapshot = mediaChangeSnapshot ?? lastStableSnapshot ?? createReadingSnapshot()
           const horizontalProgress =
             snapshot.horizontalProgress ??
             (snapshot.mode === 'horizontal'
@@ -233,7 +280,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           const restoredAnchor = chapterElements.get(restoredReadingState.chapter) ?? snapshot.anchor
           const anchorScrollY = restoredAnchor?.isConnected
             ? Math.max(0, restoredAnchor.getBoundingClientRect().top + window.scrollY - snapshot.anchorOffset)
-            : savedScrollY
+            : snapshot.scrollY
           const restoredScrollY =
             activeMotionMode === 'horizontal' && snapshot.chapter !== '00' && horizontalTrigger && horizontalTravel > 0
               ? horizontalTrigger.start + horizontalProgress * horizontalTravel
@@ -256,6 +303,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           matchMediaTransitionActive = false
           preferenceRestorationPending = false
           mediaChangeSnapshot = undefined
+          commitStableSnapshot()
           scheduleReadingPositionCapture()
         })
       })
@@ -276,22 +324,31 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     )
     media.add(
       {
-        desktop: '(min-width: 768px) and (min-height: 600px)',
-        mobile: '(max-width: 767px), (max-height: 599px)',
-        reduceMotion: '(prefers-reduced-motion: reduce)',
+        desktop: desktopMediaQuery,
+        mobile: mobileMediaQuery,
+        reduceMotion: reduceMotionMediaQuery,
       },
       (context) => {
         const conditions = context.conditions ?? {}
         const desktop = conditions.desktop === true
         const mobile = conditions.mobile === true
         const reduceMotion = conditions.reduceMotion === true
+        const generation = ++responsiveGeneration
+        activeResponsiveGeneration = generation
+        activeResponsiveConditions = { desktop, mobile, reduceMotion }
         activeMotionMode = getMotionMode({ desktop, reduced: reduceMotion })
+        const report = (progress: number, chapter: string, horizontalProgress?: number) => {
+          reportReadingState(generation, progress, chapter, horizontalProgress)
+        }
+        if (!matchMediaTransitionActive && !preferenceRestorationPending) {
+          commitStableSnapshot()
+        }
 
         let cleanupHorizontal: (() => void) | undefined
         let signalTween: gsap.core.Tween | undefined
 
         if (reduceMotion) {
-          reportReadingState(0, '00')
+          report(0, '00')
         }
 
         if (desktop && !reduceMotion) {
@@ -317,7 +374,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
                 activeHorizontalTween = undefined
               }
               gsap.set(track, { x: 0 })
-              reportReadingState(0, '00')
+              report(0, '00')
             }
 
             const syncHorizontalTween = () => {
@@ -342,7 +399,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
                     anticipatePin: 1,
                     onUpdate: (self) => {
                       const chapter = getChapterFromProgress(self.progress)
-                      reportReadingState(self.progress, chapter, self.progress)
+                      report(self.progress, chapter, self.progress)
                     },
                   },
                 })
@@ -384,7 +441,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           chapterElements.forEach((section) => {
             const updateChapter = () => {
               const readingState = getMobileReadingState(section.dataset.chapter)
-              reportReadingState(readingState.progress, readingState.chapter)
+              report(readingState.progress, readingState.chapter)
             }
 
             ScrollTrigger.create({
@@ -398,6 +455,10 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
         }
 
         return () => {
+          if (activeResponsiveGeneration === generation) {
+            activeResponsiveGeneration = 0
+            activeResponsiveConditions = undefined
+          }
           cleanupHorizontal?.()
           signalTween?.kill()
         }
@@ -406,9 +467,9 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     )
     ScrollTrigger.refresh()
     matchMediaInitListener = () => {
+      cancelReadingPositionCapture()
       if (!mediaChangeSnapshot) {
-        flushReadingPosition()
-        mediaChangeSnapshot = createReadingSnapshot()
+        mediaChangeSnapshot = { ...(lastStableSnapshot ?? createReadingSnapshot()) }
       }
       matchMediaTransitionActive = true
       preferenceRestorationPending = true
@@ -418,7 +479,6 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     }
     matchMediaEvents.addEventListener('matchMediaInit', matchMediaInitListener)
     matchMediaEvents.addEventListener('matchMedia', matchMediaListener)
-    reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)')
     reducedMotionListener = scheduleReadingRestoration
     reducedMotionMedia.addEventListener('change', reducedMotionListener)
   })
