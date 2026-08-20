@@ -4,7 +4,7 @@
 
 **Goal:** Add one-shot SplitText title reveals and ScrambleText terminal decoding without disturbing the homepage's existing responsive ScrollTrigger story.
 
-**Architecture:** Keep `src/lib/gsap.ts` as the only plugin registration boundary, add a DOM-scoped `textMotion` controller that owns splitting, timelines, one-shot state, and cleanup, and let `useHomeMotion` remain the only Vue lifecycle and scroll-orchestration owner. Vue components expose stable data attributes and final accessible labels; reduced-motion bypasses the controller entirely so the original DOM is rendered immediately.
+**Architecture:** Keep `src/lib/gsap.ts` as the only plugin registration boundary, add a DOM-scoped `textMotion` controller that owns splitting, timelines, and cleanup, and let `useHomeMotion` own both Vue/scroll orchestration and the page-lifetime one-shot registry shared by replacement controllers. Vue components expose stable data attributes and final accessible labels; reduced-motion bypasses the controller entirely so the original DOM is rendered immediately.
 
 **Tech Stack:** Vue 3, TypeScript, GSAP 3.15 SplitText/ScrambleText/ScrollTrigger, Vitest, Vue Test Utils, Playwright.
 
@@ -669,6 +669,8 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
 
 Chapter `00` keeps its `ENTRY` label static so the approved hero order remains title, body, then command. Cache each visual label/command's trimmed final text once, and do not create a ScrambleText tween when that value is empty. The `onSplit` callback must return the timeline expression. GSAP records the animation time before an automatic re-split: unplayed replacements remain paused, in-flight replacements call `timeline.play()` with no position so the restored time continues running, and completed replacements record their final absolute `totalTime()`. If changed line counts alter a completed replacement's natural duration, return a paused parent timeline that time-scales the visual sequence and has the recorded local duration; `timeline.progress(1)` then remains at the endpoint when SplitText restores its saved absolute time. A zero completed time skips scaling safely and remains visually complete. The controller tracks the latest returned timeline for cleanup while SplitText reverts the animation it owns.
 
+The final implementation also accepts an optional externally owned one-shot registry. A standalone controller creates and clears its own registry on `revert()`. `useHomeMotion` instead passes one page-lifetime registry to every preference replacement controller and clears it only when the Vue component unmounts. Chapters present in that registry when a controller is created receive split line wrappers in their final visible state but no reveal or ScrambleText tweens, so controller replacement cannot decode them again.
+
 The controller test harness must model this lifecycle statefully: it tracks natural `duration()`/`totalDuration()`, independent `progress()` and absolute `totalTime()`, and a resplit captures the old returned timeline's `totalTime()`, reverts that animation, restores the original heading markup, invokes `onSplit`, assigns the saved total time to the replacement, and retains it as SplitText-owned. Cover unplayed, in-flight, and completed replacements with longer and shorter replacement durations, repeated resplits that update cleanup ownership, heading restoration, titleless fallback cleanup, and whitespace-only visual label/command targets.
 
 - [ ] **Step 5: Verify focused behavior and TypeScript**
@@ -814,7 +816,7 @@ media.add(
 )
 ```
 
-Import `type TextMotionController` beside `createTextMotion`. Keep the existing asset/font wait before this point. Do not instantiate SplitText before fonts and the hero image settle. This text context remains active when only the desktop/mobile width conditions change, so already-viewed chapters do not replay across a responsive breakpoint. It automatically reverts if reduced motion becomes active or the component unmounts.
+Import `type TextMotionController` beside `createTextMotion`. Keep the existing asset/font wait before this point. Do not instantiate SplitText before fonts and the hero image settle. This text context remains active when only the desktop/mobile width conditions change. Runtime preference changes may replace it, so every controller receives the same page-lifetime one-shot registry; already viewed chapters remain final and do not replay. The controller automatically reverts if reduced motion becomes active or the component unmounts, but the external registry is cleared only by component unmount.
 
 - [ ] **Step 5: Replace the old hero text entrance and compact panel batch**
 
@@ -875,7 +877,7 @@ return () => {
 }
 ```
 
-The separate no-preference context owns `textMotion.revert()`. Only its stable initial activation plays chapter `00`; a controller recreated during a runtime preference transition remains idle until canonical-state restoration plays the saved chapter. Keep component unmount as `media?.revert()`; it invokes both scoped cleanups. Do not call `ScrollTrigger.killAll()`.
+The separate no-preference context owns `textMotion.revert()`. Only its stable initial activation plays chapter `00`; a controller recreated during a runtime preference transition remains idle until canonical-state restoration requests the saved chapter. That request is intentionally a no-op for a chapter already present in the shared page-lifetime registry, while an unvisited saved chapter still plays once. Keep component unmount as `media?.revert()`, then clear the external registry; do not call `ScrollTrigger.killAll()`.
 
 ### Runtime Preference Changes
 
@@ -885,7 +887,7 @@ While media contexts are stable, valid responsive reports and scroll events upda
 
 Keep the locked snapshot through duplicate GSAP init/match cycles emitted by the same browser preference or breakpoint change, and suppress progress reporting, text playback, and the replacement controller's default chapter `00` while the cycle rebuilds. Native reduced-motion notification order must not alter the snapshot.
 
-After the replacement context exists, refresh ScrollTrigger and resynchronize the layout. Restore desktop reading position from the replacement trigger's `start + savedProgress * (end - start)`; map vertical chapters to the midpoint of the equivalent horizontal chapter; restore compact/static layouts from the saved semantic anchor and viewport offset. Temporarily force the document scroll behavior to `auto` so desktop CSS smooth scrolling cannot emit intermediate chapter reports, then restore the previous inline style. Resynchronize the header and make the saved chapter the newly active text controller's first playback. Cancel pending animation frames and remove native media, scroll, and GSAP event listeners on unmount.
+After the replacement context exists, refresh ScrollTrigger and resynchronize the layout. Restore desktop reading position from the replacement trigger's `start + savedProgress * (end - start)`; map vertical chapters to the midpoint of the equivalent horizontal chapter; restore compact/static layouts from the saved semantic anchor and viewport offset. Temporarily force the document scroll behavior to `auto` so desktop CSS smooth scrolling cannot emit intermediate chapter reports, then restore the previous inline style. Resynchronize the header and request the saved chapter on the newly active text controller; the shared registry suppresses replay for a previously viewed chapter. Cancel pending animation frames, clear the registry, and remove native media, scroll, and GSAP event listeners on unmount.
 
 #### Guarded user scroll intent
 
@@ -1080,7 +1082,7 @@ for (const chapter of ['00', '01', '02', '03', '04']) {
 
 Expected: reduced motion retains unsplit final DOM and no text animation wrappers.
 
-Add a mobile runtime-preference regression that scrolls chapter `03` into its reading area, continues scrolling within that chapter, toggles to reduced motion and back twice with `page.emulateMedia()`, and verifies each transition retains both the chapter's viewport offset and the `03 / 04` header. While reduced, assert no line masks and immediately visible final text; after motion returns, assert the original mask count is recreated without duplication and the active chapter settles to its final text. Retain no-pin, no-overflow, and runtime-error checks.
+Add a mobile runtime-preference regression that scrolls chapter `03` into its reading area, continues scrolling within that chapter, observes its settled command, toggles to reduced motion and back twice with `page.emulateMedia()`, and verifies each transition retains both the chapter's viewport offset and the `03 / 04` header. While reduced, assert no line masks and immediately visible final text; after motion returns, assert the original mask count is recreated without duplication, every split line is visible at final opacity, the label/command strings remain final, and no mutation contains a non-final decoded string during a `>0.8s` observation window. A single same-string child replacement performed by GSAP timeline cleanup is not a replay. Retain no-pin, no-overflow, and runtime-error checks.
 
 Add three state-restoration regressions: a desktop preference round trip, after reduced mode has fully settled, must return to the same ScrollTrigger progress and track transform; reduced mobile mode must track a scroll from chapter `03` to chapter `04` before recreating text motion; and a mobile-to-desktop-to-mobile breakpoint round trip must retain chapter `03`, its exact viewport offset, and its compact scroll position after each post-refresh rebuild.
 

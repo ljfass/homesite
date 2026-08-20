@@ -435,7 +435,13 @@ describe('useHomeMotion', () => {
     expect(mocks.gsap.matchMedia).toHaveBeenCalledTimes(1)
     expect(mocks.media.add).toHaveBeenCalledTimes(2)
     expect(mocks.createTextMotion).toHaveBeenCalledTimes(1)
-    expect(mocks.createTextMotion).toHaveBeenCalledWith(expect.any(HTMLElement))
+    expect(mocks.createTextMotion).toHaveBeenCalledWith(expect.any(HTMLElement), {
+      oneShotState: {
+        played: expect.any(Set),
+        completed: expect.any(Set),
+        completedTimes: expect.any(Map),
+      },
+    })
     expect(mocks.textMotion.playChapter).toHaveBeenCalledWith('00')
     expect(mocks.ScrollTrigger.batch).not.toHaveBeenCalled()
     expect(mocks.ScrollTrigger.create).toHaveBeenCalledTimes(5)
@@ -564,6 +570,64 @@ describe('useHomeMotion', () => {
     expect(mocks.reducedMotionMedia.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
     expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMediaInit', expect.any(Function))
     expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMedia', expect.any(Function))
+  })
+
+  it('shares one-shot text state across preference controllers and clears it on unmount', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = stubAnimationFrames()
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    type OneShotState = {
+      played: Set<string>
+      completed: Set<string>
+      completedTimes: Map<string, number>
+    }
+    const receivedStates: OneShotState[] = []
+    const decodedChapters: string[] = []
+    mocks.createTextMotion.mockReset().mockImplementation(
+      (_scope: HTMLElement, options?: { oneShotState?: OneShotState }) => {
+        const oneShotState =
+          options?.oneShotState ?? {
+            played: new Set<string>(),
+            completed: new Set<string>(),
+            completedTimes: new Map<string, number>(),
+          }
+        receivedStates.push(oneShotState)
+        return {
+          playChapter: vi.fn((chapter: string) => {
+            if (oneShotState.played.has(chapter)) return
+            oneShotState.played.add(chapter)
+            decodedChapters.push(chapter)
+          }),
+          revert: vi.fn(),
+        }
+      },
+    )
+
+    const { wrapper } = mountHarness()
+    await settle()
+    mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+    frames.runAll()
+    expect(decodedChapters).toEqual(['00', '03'])
+
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
+    frames.runAll()
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: false })
+    frames.runAll()
+
+    expect(receivedStates).toHaveLength(2)
+    expect(receivedStates[1]).toBe(receivedStates[0])
+    expect(decodedChapters).toEqual(['00', '03'])
+
+    mocks.ScrollTrigger.create.mock.calls.at(-1)?.[0].onEnter()
+    frames.runAll()
+    expect(decodedChapters).toEqual(['00', '03', '04'])
+
+    const pageState = receivedStates[0]
+    wrapper.unmount()
+    expect(pageState.played).toEqual(new Set())
+    expect(pageState.completed).toEqual(new Set())
+    expect(pageState.completedTimes).toEqual(new Map())
   })
 
   it('restores exact desktop ScrollTrigger progress after a preference round trip', async () => {

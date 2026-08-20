@@ -335,6 +335,50 @@ describe('createTextMotion', () => {
     expect(timeline.play).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps completed chapters static across controllers that share one-shot state', () => {
+    const scope = mountMarkup(chapter('03') + chapter('04'))
+    const oneShotState = {
+      played: new Set<string>(),
+      completed: new Set<string>(),
+      completedTimes: new Map<string, number>(),
+    }
+    const firstController = createTextMotion(scope, { oneShotState })
+    const firstChapterTimeline = timelineFor(0)
+    firstController.playChapter('03')
+    firstChapterTimeline.totalTime(firstChapterTimeline.totalDuration() as number)
+    const onComplete = mocks.timelines[0].vars.onComplete as () => void
+    onComplete()
+    firstController.revert()
+
+    const replacementTimelineIndex = mocks.timelines.length
+    const replacementController = createTextMotion(scope, { oneShotState })
+    const inheritedChapterTimeline = timelineFor(replacementTimelineIndex)
+    const newChapterTimeline = timelineFor(replacementTimelineIndex + 1)
+    replacementController.playChapter('03')
+    replacementController.playChapter('04')
+
+    expect(oneShotState.played).toEqual(new Set(['03', '04']))
+    expect(oneShotState.completed).toContain('03')
+    expect(inheritedChapterTimeline.from).not.toHaveBeenCalled()
+    expect(inheritedChapterTimeline.to).not.toHaveBeenCalled()
+    expect(inheritedChapterTimeline.play).not.toHaveBeenCalled()
+    expect(newChapterTimeline.play).toHaveBeenCalledExactlyOnceWith(0)
+  })
+
+  it('keeps the default one-shot state private to each controller', () => {
+    const scope = mountMarkup(chapter('03'))
+    const firstController = createTextMotion(scope)
+    firstController.playChapter('03')
+    firstController.revert()
+
+    const replacementTimelineIndex = mocks.timelines.length
+    const replacementController = createTextMotion(scope)
+    const replacementTimeline = timelineFor(replacementTimelineIndex)
+    replacementController.playChapter('03')
+
+    expect(replacementTimeline.play).toHaveBeenCalledExactlyOnceWith(0)
+  })
+
   it('tolerates absent optional targets and still animates the remaining fallback targets', () => {
     const scope = mountMarkup(chapter('01', { title: false, command: false, label: false, copy: true, list: true }))
     expect(() => createTextMotion(scope)).not.toThrow()

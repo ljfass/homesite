@@ -60,7 +60,7 @@ When this preference changes while the page is open, preserve the reader's canon
 
 GSAP may emit more than one global match-media cycle for one browser change because several media-query listeners toggle together. Maintain a last-stable snapshot during valid responsive frames and lock that snapshot across the full rebuild, including no-op follow-up cycles. ScrollTrigger's own global init listener runs first and may revert triggers after the browser media state and CSS have already changed, so the homepage init listener must not sample layout there. Reports from an old responsive context are accepted only while both its generation and live media conditions still match.
 
-After the replacement responsive context exists, refresh ScrollTrigger, restore either the exact horizontal progress or the saved vertical anchor without CSS smooth scrolling, resynchronize header progress, and make the saved chapter the newly active text controller's first playback. Horizontal frames retain the last compact/static anchor offset instead of measuring pinned panel geometry, allowing a mobile-to-desktop-to-mobile round trip to restore the same within-chapter offset. The same post-refresh resynchronization applies to desktop/mobile breakpoint changes. A default chapter `00`, reduced-motion placeholder, cleanup report, or trigger emitted while contexts are rebuilding must not update the header or drive text playback.
+After the replacement responsive context exists, refresh ScrollTrigger, restore either the exact horizontal progress or the saved vertical anchor without CSS smooth scrolling, and resynchronize header progress. Restoration requests `playChapter(savedChapter)` on the replacement text controller, but the page-lifetime one-shot registry makes that request a static no-op when the chapter already played; only a newly reached chapter starts its first sequence. Horizontal frames retain the last compact/static anchor offset instead of measuring pinned panel geometry, allowing a mobile-to-desktop-to-mobile round trip to restore the same within-chapter offset. The same post-refresh resynchronization applies to desktop/mobile breakpoint changes. A default chapter `00`, reduced-motion placeholder, cleanup report, or trigger emitted while contexts are rebuilding must not update the header or drive text playback.
 
 A reader may scroll during the short guarded rebuild window. Capture-phase wheel, touch-move, and scrolling-key input (`ArrowUp`, `ArrowDown`, `PageUp`, `PageDown`, `Home`, `End`, and `Space`) create a monotonically increasing intent token bound to the current responsive generation while a transition or restoration is pending. Capture phase is required because ScrollTrigger's earlier window listener may synchronously report the new chapter from the same input event. Prevented or composing key events and events originating inside an input, textarea, select, or contenteditable region are not scroll intent.
 
@@ -97,9 +97,10 @@ Add `src/lib/textMotion.ts` as a focused DOM-motion factory. It will:
 - Find title, command, label, body, and list targets within one chapter element.
 - Create responsive SplitText line masks for title targets.
 - Create the chapter's paused GSAP timeline.
-- Keep an internal `Set<string>` of chapter identifiers that have played.
+- Accept an optional external page-lifetime one-shot registry; standalone controllers default to a private registry.
+- Keep inherited played chapters at their final visible state without rebuilding their reveal or decode tweens.
 - Expose a `playChapter(chapter)` operation that is idempotent.
-- Expose cleanup that reverts SplitText, kills timelines, and restores the original DOM.
+- Expose cleanup that reverts SplitText, kills timelines, and restores the original DOM. Controller cleanup clears only a private registry, never an externally owned registry.
 
 The module does not own Vue lifecycle hooks or ScrollTrigger positioning.
 
@@ -109,6 +110,7 @@ The module does not own Vue lifecycle hooks or ScrollTrigger positioning.
 
 - Create the text-motion module after fonts and root images settle.
 - Play chapter `00` only after stable initial initialization; a controller recreated during runtime preference restoration waits for the saved canonical chapter.
+- Own the shared one-shot registry for the full Vue component lifetime, pass it to every replacement text controller, and clear it only on component unmount.
 - Invoke `playChapter()` when its existing desktop progress logic reaches a new chapter.
 - Invoke `playChapter()` from the existing compact chapter triggers.
 - Avoid creating the text-motion module inside the reduced-motion branch.
@@ -171,6 +173,7 @@ If a chapter has already completed its sequence, a responsive re-split must leav
 - Responsive re-splitting preserves completed progress.
 - Reduced-motion setup creates no SplitText or ScrambleText activity.
 - Runtime preference changes retain the saved canonical chapter for both progress reporting and text playback.
+- Runtime preference controller replacement does not decode an already played canonical chapter, while a newly reached chapter still plays once.
 - Final command and label strings match the typed content source.
 
 ### Browser Tests

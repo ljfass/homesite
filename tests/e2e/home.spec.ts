@@ -42,6 +42,20 @@ async function expectTextMotionSettled(page: Page, chapter: string): Promise<voi
     const staticCommand = section.locator('[data-text-static="command"]')
     await expect(command).toHaveText((await staticCommand.textContent()) ?? '', { timeout: 8_000 })
   }
+
+  const splitLines = section.locator('.text-motion-line')
+  if ((await splitLines.count()) > 0) {
+    await expect
+      .poll(() =>
+        splitLines.evaluateAll((lines) =>
+          lines.every((line) => {
+            const styles = getComputedStyle(line)
+            return styles.visibility !== 'hidden' && Number(styles.opacity) > 0.98 && line.getClientRects().length > 0
+          }),
+        ),
+      )
+      .toBe(true)
+  }
 }
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
@@ -397,6 +411,38 @@ test('mobile preserves the active chapter when runtime motion preferences change
   await chapter.evaluate((section) => section.scrollIntoView({ block: 'center' }))
   await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
   await expectChapterTextVisible(page, '03')
+  await expectTextMotionSettled(page, '03')
+
+  await page.evaluate(() => {
+    const command = document.querySelector('[data-chapter="03"] [data-text-command]')
+    const runtimeWindow = window as Window & {
+      __preferenceReplayMutations?: number
+      __preferenceReplayObserver?: MutationObserver
+    }
+    const finalCommand = document.querySelector('[data-chapter="03"] [data-text-static="command"]')?.textContent ?? ''
+    runtimeWindow.__preferenceReplayMutations = 0
+    runtimeWindow.__preferenceReplayObserver = new MutationObserver((records) => {
+      const replayRecords = records.filter((record) => {
+        if (record.type === 'characterData') {
+          return record.oldValue !== finalCommand || record.target.textContent !== finalCommand
+        }
+
+        return Array.from(record.addedNodes)
+          .concat(Array.from(record.removedNodes))
+          .some((node) => node.textContent !== finalCommand)
+      })
+      runtimeWindow.__preferenceReplayMutations =
+        (runtimeWindow.__preferenceReplayMutations ?? 0) + replayRecords.length
+    })
+    if (command) {
+      runtimeWindow.__preferenceReplayObserver.observe(command, {
+        childList: true,
+        characterData: true,
+        characterDataOldValue: true,
+        subtree: true,
+      })
+    }
+  })
 
   const initialMaskCount = await page.locator('.text-motion-line').count()
   expect(initialMaskCount).toBeGreaterThan(0)
@@ -443,7 +489,18 @@ test('mobile preserves the active chapter when runtime motion preferences change
       .poll(() => page.locator('.text-motion-line').count(), { timeout: 8_000 })
       .toBe(initialMaskCount)
     await expectChapterTextVisible(page, '03')
+    await expectTextMotionSettled(page, '03')
+    await page.waitForTimeout(900)
+    const replayMutations = await page.evaluate(
+      () => (window as Window & { __preferenceReplayMutations?: number }).__preferenceReplayMutations ?? 0,
+    )
+    expect(replayMutations, 'preference rebuild must not decode a settled command').toBe(0)
   }
+
+  await page.evaluate(() => {
+    const runtimeWindow = window as Window & { __preferenceReplayObserver?: MutationObserver }
+    runtimeWindow.__preferenceReplayObserver?.disconnect()
+  })
 
   await expect(page.locator('.pin-spacer')).toHaveCount(0)
   await expectNoHorizontalOverflow(page)

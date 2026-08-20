@@ -1,7 +1,11 @@
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
 import { gsap, ScrollTrigger } from '../lib/gsap'
 import { getChapterFromProgress, getHorizontalTravel, getMotionMode, type MotionMode } from '../lib/motion'
-import { createTextMotion, type TextMotionController } from '../lib/textMotion'
+import {
+  createTextMotion,
+  type TextMotionController,
+  type TextMotionOneShotState,
+} from '../lib/textMotion'
 
 type MotionUpdate = (progress: number, chapter: string) => void
 
@@ -131,6 +135,11 @@ function getHorizontalProgressForChapter(chapter: string): number {
 }
 
 export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: MotionUpdate): void {
+  const textMotionOneShotState: TextMotionOneShotState = {
+    played: new Set<string>(),
+    completed: new Set<string>(),
+    completedTimes: new Map<string, number>(),
+  }
   let media: gsap.MatchMedia | undefined
   const matchMediaEvents = gsap as typeof gsap & MatchMediaEventSource
   let assetAbortController: AbortController | undefined
@@ -414,7 +423,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     media.add(
       '(prefers-reduced-motion: no-preference)',
       () => {
-        textMotion = createTextMotion(scope)
+        textMotion = createTextMotion(scope, { oneShotState: textMotionOneShotState })
         if (!matchMediaTransitionActive && !preferenceRestorationPending) {
           textMotion.playChapter('00')
         }
@@ -640,5 +649,8 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     pendingUserSnapshot = undefined
     transitionUserScrollIntent = undefined
     media?.revert()
+    textMotionOneShotState.played.clear()
+    textMotionOneShotState.completed.clear()
+    textMotionOneShotState.completedTimes.clear()
   })
 }
