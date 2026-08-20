@@ -6,7 +6,7 @@ export default defineConfig({
   test: {
     css: true,
     environment: 'jsdom',
-    exclude: [...configDefaults.exclude, 'tests/e2e/**'],
+    exclude: [...configDefaults.exclude, '.worktrees/**', 'tests/e2e/**'],
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
   },
