@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => {
       create: vi.fn(),
       refresh: vi.fn(),
     },
-    mediaCleanups: [] as Array<{ queries: string | object; cleanup: () => void }>,
+    mediaCleanups: [] as Array<{ queries: string | object; scope: HTMLElement; cleanup: () => void }>,
   }
 })
 
@@ -43,6 +43,12 @@ import { useHomeMotion, waitForRootAssets } from '../composables/useHomeMotion'
 type MotionReport = {
   progress: number
   chapter: string
+}
+
+type MediaCleanup = {
+  queries: string | object
+  scope: HTMLElement
+  cleanup: () => void
 }
 
 const wrappers: VueWrapper[] = []
@@ -94,7 +100,7 @@ function configureGsap(conditions: Record<string, boolean>): void {
 
     const cleanup = callback({ conditions: mocks.conditions })
     if (typeof cleanup === 'function') {
-      mocks.mediaCleanups.push({ queries, cleanup })
+      mocks.mediaCleanups.push({ queries, scope, cleanup })
     }
   })
   mocks.media.revert.mockReset().mockImplementation(() => {
@@ -111,6 +117,31 @@ function configureGsap(conditions: Record<string, boolean>): void {
   mocks.textMotion.playChapter.mockReset()
   mocks.textMotion.revert.mockReset()
   mocks.createTextMotion.mockReset().mockReturnValue(mocks.textMotion)
+}
+
+function getResponsiveCleanup(): MediaCleanup | undefined {
+  return mocks.mediaCleanups.find(({ queries }) => typeof queries === 'object')
+}
+
+function replaceResponsiveContext(): void {
+  const cleanupIndex = mocks.mediaCleanups.findIndex(({ queries }) => typeof queries === 'object')
+  if (cleanupIndex < 0) {
+    return
+  }
+
+  const [{ cleanup }] = mocks.mediaCleanups.splice(cleanupIndex, 1)
+  cleanup()
+
+  const responsiveCall = mocks.media.add.mock.calls.find(([queries]) => typeof queries === 'object')
+  if (!responsiveCall) {
+    return
+  }
+
+  const [queries, callback, scope] = responsiveCall
+  const replacementCleanup = callback({ conditions: mocks.conditions })
+  if (typeof replacementCleanup === 'function') {
+    mocks.mediaCleanups.push({ queries, scope, cleanup: replacementCleanup })
+  }
 }
 
 function mountHarness(
@@ -217,25 +248,50 @@ describe('useHomeMotion', () => {
   })
 
   it('keeps text playback alive across responsive cleanup and reverts it only with the media context', async () => {
-    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    configureGsap({ desktop: true, mobile: false, reduceMotion: false })
     setFontsReady(Promise.resolve())
+    const firstSignal = { kill: vi.fn() }
+    const replacementSignal = { kill: vi.fn() }
+    const firstHorizontal = { kill: vi.fn() }
+    const replacementHorizontal = { kill: vi.fn() }
+    mocks.gsap.from.mockReturnValueOnce(firstSignal).mockReturnValueOnce(replacementSignal)
+    mocks.gsap.to.mockReturnValueOnce(firstHorizontal).mockReturnValueOnce(replacementHorizontal)
 
-    const { wrapper } = mountHarness()
+    const { wrapper } = mountHarness({ story: true, signal: true })
+    const stage = wrapper.get('[data-story-stage]').element
+    const track = wrapper.get('[data-story-track]').element
+    Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1000 })
+    Object.defineProperty(track, 'scrollWidth', { configurable: true, value: 1600 })
     await settle()
-    const responsive = mocks.mediaCleanups.find(({ queries }) => typeof queries === 'object')
+    const responsive = getResponsiveCleanup()
+    const textCleanup = mocks.mediaCleanups.find(({ queries }) => typeof queries === 'string')
     expect(responsive).toBeDefined()
+    expect(textCleanup).toBeDefined()
 
-    responsive?.cleanup()
+    replaceResponsiveContext()
+    expect(firstSignal.kill).toHaveBeenCalledTimes(1)
+    expect(firstHorizontal.kill).toHaveBeenCalledTimes(1)
+    expect(replacementSignal.kill).not.toHaveBeenCalled()
+    expect(replacementHorizontal.kill).not.toHaveBeenCalled()
     expect(mocks.textMotion.revert).not.toHaveBeenCalled()
+    expect(mocks.mediaCleanups).toHaveLength(2)
+    expect(getResponsiveCleanup()).toBeDefined()
+    expect(getResponsiveCleanup()).not.toBe(responsive)
+    expect(getResponsiveCleanup()?.cleanup).not.toBe(responsive?.cleanup)
+    expect(getResponsiveCleanup()?.scope).toBe(responsive?.scope)
+    expect(mocks.mediaCleanups.find(({ queries }) => typeof queries === 'string')).toBe(textCleanup)
 
-    const responsiveCallback = mocks.media.add.mock.calls[1][1]
-    responsiveCallback({ conditions: mocks.conditions })
-    const latestTrigger = mocks.ScrollTrigger.create.mock.calls.at(-1)?.[0]
-    latestTrigger?.onEnter()
-    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('04')
+    const replacementScrollTrigger = mocks.gsap.to.mock.calls[1][1].scrollTrigger
+    replacementScrollTrigger.onUpdate({ progress: 0.5 })
+    expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('03')
 
     wrapper.unmount()
+    expect(firstSignal.kill).toHaveBeenCalledTimes(1)
+    expect(firstHorizontal.kill).toHaveBeenCalledTimes(1)
+    expect(replacementSignal.kill).toHaveBeenCalledTimes(1)
+    expect(replacementHorizontal.kill).toHaveBeenCalledTimes(1)
     expect(mocks.textMotion.revert).toHaveBeenCalledTimes(1)
+    expect(mocks.mediaCleanups).toEqual([])
   })
 
   it('uses only the signal entrance and connects desktop scroll updates to text playback', async () => {
@@ -260,10 +316,6 @@ describe('useHomeMotion', () => {
     expect(reports).toContainEqual({ progress: 0.5, chapter: '03' })
     expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('03')
 
-    const responsive = mocks.mediaCleanups.find(({ queries }) => typeof queries === 'object')
-    responsive?.cleanup()
-    expect(signalTween.kill).toHaveBeenCalledTimes(1)
-    expect(mocks.textMotion.revert).not.toHaveBeenCalled()
   })
 
   it('creates and cleans up the horizontal tween when desktop overflow crosses zero', async () => {
