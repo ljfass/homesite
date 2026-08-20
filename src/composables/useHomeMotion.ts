@@ -112,7 +112,14 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     lastReadingAnchor = scope.querySelector<HTMLElement>('[data-chapter="00"]') ?? undefined
     lastReadingAnchorOffset = lastReadingAnchor?.getBoundingClientRect().top ?? 0
     scrollPositionListener = () => {
+      if (matchMediaTransitionActive || preferenceRestorationPending) {
+        return
+      }
+
       savedScrollY = window.scrollY
+      if (lastReadingAnchor?.isConnected) {
+        lastReadingAnchorOffset = lastReadingAnchor.getBoundingClientRect().top
+      }
     }
     window.addEventListener('scroll', scrollPositionListener, { passive: true })
 
@@ -139,6 +146,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
         lastReadingAnchorOffset = anchor.getBoundingClientRect().top
       }
       onMotionUpdate(progress, chapter)
+      textMotion?.playChapter(chapter)
     }
     const scheduleReadingRestoration = () => {
       const token = ++restorationToken
@@ -199,7 +207,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
         const reduceMotion = conditions.reduceMotion === true
 
         if (reduceMotion) {
-          onMotionUpdate(0, '00')
+          reportReadingState(0, '00')
           return
         }
 
@@ -225,7 +233,7 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
               horizontalTween?.kill()
               horizontalTween = undefined
               gsap.set(track, { x: 0 })
-              onMotionUpdate(0, '00')
+              reportReadingState(0, '00')
             }
 
             const syncHorizontalTween = () => {
@@ -251,7 +259,6 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
                     onUpdate: (self) => {
                       const chapter = getChapterFromProgress(self.progress)
                       reportReadingState(self.progress, chapter)
-                      textMotion?.playChapter(chapter)
                     },
                   },
                 })
@@ -295,7 +302,6 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
             const updateChapter = () => {
               const readingState = getMobileReadingState(section.dataset.chapter)
               reportReadingState(readingState.progress, readingState.chapter)
-              textMotion?.playChapter(readingState.chapter)
             }
 
             ScrollTrigger.create({

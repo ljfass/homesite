@@ -217,6 +217,19 @@ function activateTextContext(): void {
   }
 }
 
+function activateResponsiveContext(): void {
+  const responsiveCall = mocks.media.add.mock.calls.find(([queries]) => typeof queries === 'object')
+  if (!responsiveCall) {
+    return
+  }
+
+  const [queries, callback, scope] = responsiveCall
+  const cleanup = callback({ conditions: mocks.conditions })
+  if (typeof cleanup === 'function') {
+    mocks.mediaCleanups.push({ queries, scope, cleanup })
+  }
+}
+
 function emitReducedMotionChange(matches: boolean): void {
   mocks.reducedMotionMedia.matches = matches
   const event = { matches, media: mocks.reducedMotionMedia.media } as MediaQueryListEvent
@@ -225,6 +238,10 @@ function emitReducedMotionChange(matches: boolean): void {
 
 function emitGsapMatchMediaInit(): void {
   mocks.matchMediaInitListener?.()
+}
+
+function emitGsapMatchMedia(): void {
+  mocks.matchMediaListener?.()
 }
 
 function mountHarness(
@@ -340,12 +357,9 @@ describe('useHomeMotion', () => {
     expect(mocks.textMotion.playChapter).toHaveBeenLastCalledWith('04')
   })
 
-  it('restores the saved compact reading state after native preference changes settle', async () => {
+  it('restores the latest stable compact viewport offset after native preference changes settle', async () => {
     configureGsap({ desktop: false, mobile: true, reduceMotion: false })
     setFontsReady(Promise.resolve())
-    const firstTextMotion = { playChapter: vi.fn(), revert: vi.fn() }
-    const replacementTextMotion = { playChapter: vi.fn(), revert: vi.fn() }
-    mocks.createTextMotion.mockReset().mockReturnValueOnce(firstTextMotion).mockReturnValueOnce(replacementTextMotion)
     const frames = new Map<number, FrameRequestCallback>()
     let frameId = 0
     const requestFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -354,6 +368,14 @@ describe('useHomeMotion', () => {
       return frameId
     })
     const cancelFrame = vi.fn((id: number) => frames.delete(id))
+    const runNextFrame = () => {
+      const next = [...frames.entries()].sort(([left], [right]) => left - right)[0]
+      expect(next).toBeDefined()
+      if (!next) return
+      const [id, callback] = next
+      frames.delete(id)
+      callback(0)
+    }
     vi.stubGlobal('requestAnimationFrame', requestFrame)
     vi.stubGlobal('cancelAnimationFrame', cancelFrame)
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
@@ -368,31 +390,88 @@ describe('useHomeMotion', () => {
     )
     compactChapter.onEnter()
     window.dispatchEvent(new Event('scroll'))
-    expect(mocks.reducedMotionMedia.addEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+
+    anchorTop = -60
+    window.scrollY = 820
+    window.dispatchEvent(new Event('scroll'))
 
     emitGsapMatchMediaInit()
     mocks.ScrollTrigger.create.mock.calls[0][0].onEnter()
     emitGsapMatchMediaInit()
     mocks.ScrollTrigger.create.mock.calls[2][0].onEnter()
-    emitReducedMotionChange(true)
     deactivateTextContext()
     anchorTop = 760
     window.scrollY = 0
     window.dispatchEvent(new Event('scroll'))
+    emitGsapMatchMedia()
+    emitReducedMotionChange(true)
     expect(scrollTo).not.toHaveBeenCalled()
-    expect(requestFrame).toHaveBeenCalledTimes(1)
-    const firstFrame = frames.get(1)
-    firstFrame?.(0)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+    runNextFrame()
+    runNextFrame()
     expect(scrollTo).not.toHaveBeenCalled()
-    const secondFrame = frames.get(2)
-    secondFrame?.(0)
-    expect(scrollTo).toHaveBeenCalledWith({ top: 640, behavior: 'auto' })
+    runNextFrame()
+    expect(scrollTo).toHaveBeenCalledWith({ top: 820, behavior: 'auto' })
     expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
 
+    wrapper.unmount()
+  })
+
+  it('suppresses synthetic reports and text playback for a complete match-media rebuild cycle', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const firstTextMotion = { playChapter: vi.fn(), revert: vi.fn() }
+    const replacementTextMotion = { playChapter: vi.fn(), revert: vi.fn() }
+    mocks.createTextMotion.mockReset().mockReturnValueOnce(firstTextMotion).mockReturnValueOnce(replacementTextMotion)
+    const frames = new Map<number, FrameRequestCallback>()
+    let frameId = 0
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frameId += 1
+      frames.set(frameId, callback)
+      return frameId
+    })
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    const runNextFrame = () => {
+      const next = [...frames.entries()].sort(([left], [right]) => left - right)[0]
+      expect(next).toBeDefined()
+      if (!next) return
+      const [id, callback] = next
+      frames.delete(id)
+      callback(0)
+    }
+
+    const { reports, wrapper } = mountHarness()
+    await settle()
+    mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+
+    emitGsapMatchMediaInit()
+    mocks.conditions = { desktop: false, mobile: true, reduceMotion: true }
+    deactivateTextContext()
+    replaceResponsiveContext()
+    expect(reports).toEqual([{ progress: 0.75, chapter: '03' }])
+    emitGsapMatchMedia()
+    emitReducedMotionChange(true)
+    runNextFrame()
+    runNextFrame()
+    runNextFrame()
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+
+    emitGsapMatchMediaInit()
+    mocks.conditions = { desktop: false, mobile: true, reduceMotion: false }
     emitReducedMotionChange(false)
     activateTextContext()
-    frames.get(3)?.(0)
-    frames.get(4)?.(0)
+    activateResponsiveContext()
+    const replacementChapter = mocks.ScrollTrigger.create.mock.calls.at(-4)?.[0]
+    replacementChapter?.onEnter()
+    expect(replacementTextMotion.playChapter).toHaveBeenCalledTimes(1)
+    expect(replacementTextMotion.playChapter).toHaveBeenLastCalledWith('00')
+    emitGsapMatchMedia()
+    runNextFrame()
+    runNextFrame()
+    runNextFrame()
+    expect(replacementTextMotion.playChapter).toHaveBeenCalledTimes(2)
     expect(replacementTextMotion.playChapter).toHaveBeenLastCalledWith('03')
 
     wrapper.unmount()

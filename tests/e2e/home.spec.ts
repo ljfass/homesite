@@ -222,14 +222,27 @@ test('mobile preserves the active chapter when runtime motion preferences change
 
   const initialMaskCount = await page.locator('.text-motion-line').count()
   expect(initialMaskCount).toBeGreaterThan(0)
-  const initialScrollY = await page.evaluate(() => window.scrollY)
+  const chapterEntryScrollY = await page.evaluate(() => window.scrollY)
+  await page.evaluate(() => window.scrollBy({ top: 160, behavior: 'instant' }))
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 8_000 }).toBeGreaterThan(chapterEntryScrollY + 120)
+  const readingPosition = await chapter.evaluate((section) => ({
+    scrollY: window.scrollY,
+    chapterTop: section.getBoundingClientRect().top,
+  }))
 
   for (let cycle = 0; cycle < 2; cycle += 1) {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await expect(chapter).toBeInViewport({ ratio: 0.1 })
     await expect
-      .poll(() => page.evaluate((baseline) => Math.abs(window.scrollY - baseline), initialScrollY), { timeout: 8_000 })
-      .toBeLessThan(96)
+      .poll(
+        () =>
+          chapter.evaluate((section, baseline) => ({
+            scrollDelta: Math.abs(window.scrollY - baseline.scrollY),
+            chapterDelta: Math.abs(section.getBoundingClientRect().top - baseline.chapterTop),
+          }), readingPosition),
+        { timeout: 8_000 },
+      )
+      .toEqual({ scrollDelta: 0, chapterDelta: 0 })
     await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
     await expect(page.locator('.text-motion-line')).toHaveCount(0)
     await expectChapterTextVisible(page, '03')
@@ -237,8 +250,15 @@ test('mobile preserves the active chapter when runtime motion preferences change
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await expect(chapter).toBeInViewport({ ratio: 0.1 })
     await expect
-      .poll(() => page.evaluate((baseline) => Math.abs(window.scrollY - baseline), initialScrollY), { timeout: 8_000 })
-      .toBeLessThan(96)
+      .poll(
+        () =>
+          chapter.evaluate((section, baseline) => ({
+            scrollDelta: Math.abs(window.scrollY - baseline.scrollY),
+            chapterDelta: Math.abs(section.getBoundingClientRect().top - baseline.chapterTop),
+          }), readingPosition),
+        { timeout: 8_000 },
+      )
+      .toEqual({ scrollDelta: 0, chapterDelta: 0 })
     await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
     await expect
       .poll(() => page.locator('.text-motion-line').count(), { timeout: 8_000 })
