@@ -358,6 +358,10 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
             return
           }
 
+          if (readingPositionFrame !== undefined) {
+            cancelReadingPositionCapture()
+            capturePendingUserPosition()
+          }
           transitionUserScrollIntent = undefined
           ScrollTrigger.refresh()
           const snapshot =

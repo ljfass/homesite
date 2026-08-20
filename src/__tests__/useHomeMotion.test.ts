@@ -766,6 +766,42 @@ describe('useHomeMotion', () => {
     wrapper.unmount()
   })
 
+  it('flushes same-chapter input that arrives between restoration frames', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = stubAnimationFrames()
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((optionsOrX) => {
+      const { top } = optionsOrX as unknown as ScrollToOptions
+      window.scrollY = top ?? window.scrollY
+    })
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 2_000, writable: true })
+
+    const { reports, wrapper } = mountHarness()
+    await settle()
+    const chapter03 = mocks.ScrollTrigger.create.mock.calls[3][0]
+    vi.spyOn(chapter03.trigger, 'getBoundingClientRect').mockImplementation(() =>
+      DOMRect.fromRect({ y: 2_120 - window.scrollY }),
+    )
+    chapter03.onEnter()
+    window.dispatchEvent(new Event('scroll'))
+    frames.runAll()
+
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
+    expect(frames.pending()).toBe(1)
+    frames.runNext()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }))
+    window.scrollY = 2_100
+    window.dispatchEvent(new Event('scroll'))
+    expect(frames.pending()).toBe(2)
+
+    frames.runNext()
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 2_100, behavior: 'auto' })
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+    frames.runAll()
+    wrapper.unmount()
+  })
+
   it.each(['prevented', 'composing', 'input', 'textarea', 'select', 'contenteditable'] as const)(
     'ignores %s keyboard events during restoration',
     async (eventSource) => {
