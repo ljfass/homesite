@@ -21,6 +21,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
   const states = new Map<string, ChapterState>()
   const played = new Set<string>()
   const completed = new Set<string>()
+  const completedTimes = new Map<string, number>()
   let reverted = false
 
   for (const chapterElement of scope.querySelectorAll<HTMLElement>('[data-chapter]')) {
@@ -37,13 +38,19 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
     const copyTargets = [copy, ...listItems].filter((target): target is HTMLElement => target !== null)
 
     const makeTimeline = (lines: Element[] = []): gsap.core.Timeline => {
-      const timeline = gsap.timeline({
+      let sequence!: gsap.core.Timeline
+      sequence = gsap.timeline({
         paused: true,
-        onComplete: () => completed.add(chapter),
+        onComplete: () => {
+          if (!completed.has(chapter)) {
+            completed.add(chapter)
+            completedTimes.set(chapter, sequence.totalTime())
+          }
+        },
       })
 
       if (chapter !== '00' && label && labelText) {
-        timeline.to(
+        sequence.to(
           label,
           {
             duration: 0.45,
@@ -55,7 +62,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       }
 
       if (lines.length) {
-        timeline.from(
+        sequence.from(
           lines,
           { yPercent: 110, autoAlpha: 0, duration: 0.7, stagger: 0.1, ease: 'power3.out' },
           0.08,
@@ -63,7 +70,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       }
 
       if (copyTargets.length) {
-        timeline.from(
+        sequence.from(
           copyTargets,
           { y: 16, autoAlpha: 0, duration: 0.4, stagger: 0.06, ease: 'power2.out' },
           0.2,
@@ -71,7 +78,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       }
 
       if (command && commandText) {
-        timeline.to(
+        sequence.to(
           command,
           {
             duration: 0.8,
@@ -82,7 +89,14 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
         )
       }
 
+      let timeline = sequence
+      const completedTime = completedTimes.get(chapter)
       if (completed.has(chapter)) {
+        const naturalDuration = sequence.totalDuration()
+        if (completedTime && naturalDuration && naturalDuration !== completedTime) {
+          sequence.paused(false).timeScale(naturalDuration / completedTime)
+          timeline = gsap.timeline({ paused: true }).add(sequence)
+        }
         timeline.progress(1)
       } else if (played.has(chapter)) {
         timeline.play()
@@ -131,6 +145,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       states.clear()
       played.clear()
       completed.clear()
+      completedTimes.clear()
     },
   }
 }

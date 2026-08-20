@@ -528,6 +528,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
   const states = new Map<string, ChapterState>()
   const played = new Set<string>()
   const completed = new Set<string>()
+  const completedTimes = new Map<string, number>()
   let reverted = false
 
   scope.querySelectorAll<HTMLElement>('[data-chapter]').forEach((chapterElement) => {
@@ -549,13 +550,19 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
     const commandText = command ? textOf(command) : ''
 
     const createTimeline = (lines: Element[]): gsap.core.Timeline => {
-      const timeline = gsap.timeline({
+      let sequence!: gsap.core.Timeline
+      sequence = gsap.timeline({
         paused: true,
-        onComplete: () => completed.add(chapter),
+        onComplete: () => {
+          if (!completed.has(chapter)) {
+            completed.add(chapter)
+            completedTimes.set(chapter, sequence.totalTime())
+          }
+        },
       })
 
       if (chapter !== '00' && label && labelText) {
-        timeline.to(
+        sequence.to(
           label,
           {
             duration: 0.45,
@@ -567,7 +574,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       }
 
       if (lines.length > 0) {
-        timeline.from(
+        sequence.from(
           lines,
           { yPercent: 110, autoAlpha: 0, duration: 0.7, stagger: 0.1, ease: 'power3.out' },
           0.08,
@@ -575,7 +582,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       }
 
       if (revealTargets.length > 0) {
-        timeline.from(
+        sequence.from(
           revealTargets,
           { y: 16, autoAlpha: 0, duration: 0.4, stagger: 0.06, ease: 'power2.out' },
           0.2,
@@ -583,7 +590,7 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       }
 
       if (command && commandText) {
-        timeline.to(
+        sequence.to(
           command,
           {
             duration: 0.8,
@@ -594,12 +601,19 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
         )
       }
 
-      state.timeline = timeline
+      let timeline = sequence
+      const completedTime = completedTimes.get(chapter)
       if (completed.has(chapter)) {
+        const naturalDuration = sequence.totalDuration()
+        if (completedTime && naturalDuration && naturalDuration !== completedTime) {
+          sequence.paused(false).timeScale(naturalDuration / completedTime)
+          timeline = gsap.timeline({ paused: true }).add(sequence)
+        }
         timeline.progress(1)
       } else if (played.has(chapter)) {
         timeline.play()
       }
+      state.timeline = timeline
       return timeline
     }
 
@@ -647,14 +661,15 @@ export function createTextMotion(scope: HTMLElement): TextMotionController {
       states.clear()
       played.clear()
       completed.clear()
+      completedTimes.clear()
     },
   }
 }
 ```
 
-Chapter `00` keeps its `ENTRY` label static so the approved hero order remains title, body, then command. Cache each visual label/command's trimmed final text once, and do not create a ScrambleText tween when that value is empty. The `onSplit` callback must return the timeline expression. GSAP records the animation time before an automatic re-split: unplayed replacements remain paused, in-flight replacements call `timeline.play()` with no position so the restored time continues running, and completed replacements use `timeline.progress(1)` without playing. The controller tracks the latest replacement for cleanup while SplitText reverts the animation it owns.
+Chapter `00` keeps its `ENTRY` label static so the approved hero order remains title, body, then command. Cache each visual label/command's trimmed final text once, and do not create a ScrambleText tween when that value is empty. The `onSplit` callback must return the timeline expression. GSAP records the animation time before an automatic re-split: unplayed replacements remain paused, in-flight replacements call `timeline.play()` with no position so the restored time continues running, and completed replacements record their final absolute `totalTime()`. If changed line counts alter a completed replacement's natural duration, return a paused parent timeline that time-scales the visual sequence and has the recorded local duration; `timeline.progress(1)` then remains at the endpoint when SplitText restores its saved absolute time. A zero completed time skips scaling safely and remains visually complete. The controller tracks the latest returned timeline for cleanup while SplitText reverts the animation it owns.
 
-The controller test harness must model this lifecycle statefully: a resplit captures the old returned timeline's `totalTime()`, reverts that animation, restores the original heading markup, invokes `onSplit`, assigns the saved total time to the replacement, and retains it as SplitText-owned. Cover unplayed, in-flight, and completed replacements, repeated resplits that update cleanup ownership, heading restoration, titleless fallback cleanup, and whitespace-only visual label/command targets.
+The controller test harness must model this lifecycle statefully: it tracks natural `duration()`/`totalDuration()`, independent `progress()` and absolute `totalTime()`, and a resplit captures the old returned timeline's `totalTime()`, reverts that animation, restores the original heading markup, invokes `onSplit`, assigns the saved total time to the replacement, and retains it as SplitText-owned. Cover unplayed, in-flight, and completed replacements with longer and shorter replacement durations, repeated resplits that update cleanup ownership, heading restoration, titleless fallback cleanup, and whitespace-only visual label/command targets.
 
 - [ ] **Step 5: Verify focused behavior and TypeScript**
 

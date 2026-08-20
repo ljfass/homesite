@@ -4,8 +4,12 @@ type TimelineMock = {
   from: Mock<(...args: unknown[]) => TimelineMock>
   to: Mock<(...args: unknown[]) => TimelineMock>
   play: Mock<(position?: number) => TimelineMock>
-  progress: Mock<(value?: number) => TimelineMock>
+  progress: Mock<(value?: number) => number | TimelineMock>
   totalTime: Mock<(value?: number) => number | TimelineMock>
+  duration: Mock<(value?: number) => number | TimelineMock>
+  totalDuration: Mock<(value?: number) => number | TimelineMock>
+  timeScale: Mock<(value?: number) => number | TimelineMock>
+  add: Mock<(child: TimelineMock, position?: number) => TimelineMock>
   paused: Mock<(value?: boolean) => boolean | TimelineMock>
   revert: Mock<() => TimelineMock>
   kill: Mock<() => TimelineMock>
@@ -23,6 +27,7 @@ type SplitMock = {
 
 const mocks = vi.hoisted(() => {
   const timelines: Array<{ timeline: TimelineMock; vars: Record<string, unknown> }> = []
+  const naturalDurations: number[] = []
   const splits: Array<{
     target: HTMLElement
     vars: Record<string, unknown>
@@ -30,33 +35,84 @@ const mocks = vi.hoisted(() => {
   }> = []
 
   const timeline = vi.fn((vars: Record<string, unknown> = {}) => {
+    const configuredDuration = naturalDurations.shift()
     const state = {
       paused: vars.paused === true,
       totalTime: 0,
+      duration: configuredDuration ?? 0,
+      timeScale: 1,
+      atEndpoint: false,
       reverted: false,
       killed: false,
     }
+    const clampTime = (value: number) => Math.min(Math.max(value, 0), state.duration)
+    const updateTweenDuration = (targets: unknown, vars: unknown, position: unknown) => {
+      if (configuredDuration !== undefined || !vars || typeof vars !== 'object') return
+      const tween = vars as { duration?: unknown; stagger?: unknown }
+      const count = Array.isArray(targets) ? targets.length : 1
+      const duration = typeof tween.duration === 'number' ? tween.duration : 0
+      const stagger = typeof tween.stagger === 'number' ? tween.stagger : 0
+      const start = typeof position === 'number' ? position : 0
+      state.duration = Math.max(state.duration, start + duration + stagger * Math.max(count - 1, 0))
+    }
     const instance: TimelineMock = {
-      from: vi.fn<(...args: unknown[]) => TimelineMock>(),
-      to: vi.fn<(...args: unknown[]) => TimelineMock>(),
+      from: vi.fn<(...args: unknown[]) => TimelineMock>((...args: unknown[]) => {
+        updateTweenDuration(args[0], args[1], args[2])
+        return instance
+      }),
+      to: vi.fn<(...args: unknown[]) => TimelineMock>((...args: unknown[]) => {
+        updateTweenDuration(args[0], args[1], args[2])
+        return instance
+      }),
       play: vi.fn<(position?: number) => TimelineMock>((position?: number) => {
         state.paused = false
         if (typeof position === 'number') state.totalTime = position
         return instance
       }),
-      progress: vi.fn<(value?: number) => TimelineMock>((value?: number) => {
+      progress: vi.fn<(value?: number) => number | TimelineMock>((value?: number) => {
         if (typeof value === 'number') {
-          state.totalTime = value
-          if (value === 1) state.paused = true
+          state.totalTime = clampTime(state.duration * value)
+          state.atEndpoint = value === 1
+          return instance
         }
-        return instance
+        return state.duration ? state.totalTime / state.duration : state.atEndpoint ? 1 : 0
       }),
       totalTime: vi.fn<(value?: number) => number | TimelineMock>((value?: number) => {
         if (typeof value === 'number') {
-          state.totalTime = value
+          state.totalTime = clampTime(value)
+          state.atEndpoint = state.duration ? state.totalTime === state.duration : state.atEndpoint
           return instance
         }
         return state.totalTime
+      }),
+      duration: vi.fn<(value?: number) => number | TimelineMock>((value?: number) => {
+        if (typeof value === 'number') {
+          state.duration = Math.max(value, 0)
+          state.totalTime = clampTime(state.totalTime)
+          return instance
+        }
+        return state.duration
+      }),
+      totalDuration: vi.fn<(value?: number) => number | TimelineMock>((value?: number) => {
+        if (typeof value === 'number') {
+          state.duration = Math.max(value, 0)
+          state.totalTime = clampTime(state.totalTime)
+          return instance
+        }
+        return state.duration
+      }),
+      timeScale: vi.fn<(value?: number) => number | TimelineMock>((value?: number) => {
+        if (typeof value === 'number') {
+          state.timeScale = value
+          return instance
+        }
+        return state.timeScale
+      }),
+      add: vi.fn<(child: TimelineMock, position?: number) => TimelineMock>((child, position = 0) => {
+        const childDuration = child.totalDuration() as number
+        const childTimeScale = child.timeScale() as number
+        state.duration = Math.max(state.duration, position + childDuration / Math.abs(childTimeScale || 1))
+        return instance
       }),
       paused: vi.fn<(value?: boolean) => boolean | TimelineMock>((value?: boolean) => {
         if (typeof value === 'boolean') {
@@ -74,8 +130,6 @@ const mocks = vi.hoisted(() => {
         return instance
       }),
     }
-    instance.from.mockReturnValue(instance)
-    instance.to.mockReturnValue(instance)
     timelines.push({ timeline: instance, vars })
     return instance
   })
@@ -113,7 +167,7 @@ const mocks = vi.hoisted(() => {
       oldAnimation?.revert()
       target.innerHTML = originalHTML
       const replacement = runSplit()
-      if (typeof savedTotalTime === 'number') replacement?.totalTime(savedTotalTime)
+      if (savedTotalTime) replacement?.totalTime(savedTotalTime)
       return replacement
     })
     splits.push({ target, vars, split })
@@ -123,6 +177,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     timelines,
+    naturalDurations,
     splits,
     gsap: { timeline },
     SplitText: { create },
@@ -177,9 +232,14 @@ function timelineFor(index: number): TimelineMock {
   return mocks.timelines[index].timeline
 }
 
+function setTimelineDurations(...durations: number[]): void {
+  mocks.naturalDurations.push(...durations)
+}
+
 afterEach(() => {
   document.body.innerHTML = ''
   mocks.timelines.splice(0)
+  mocks.naturalDurations.splice(0)
   mocks.splits.splice(0)
   mocks.gsap.timeline.mockClear()
   mocks.SplitText.create.mockClear()
@@ -321,18 +381,77 @@ describe('createTextMotion', () => {
     const controller = createTextMotion(mountMarkup(chapter('01')))
     const initial = timelineFor(0)
     controller.playChapter('01')
-    initial.totalTime(1)
+    initial.totalTime(initial.totalDuration() as number)
     const onComplete = mocks.timelines[0].vars.onComplete as () => void
     onComplete()
 
     const replacement = mocks.splits[0].split.resplit() as TimelineMock
 
     expect(initial.play).toHaveBeenCalledExactlyOnceWith(0)
-    expect(initial.totalTime()).toBe(1)
+    expect(initial.totalTime()).toBe(initial.totalDuration())
     expect(replacement.progress).toHaveBeenCalledWith(1)
-    expect(replacement.totalTime()).toBe(1)
+    expect(replacement.totalTime()).toBe(replacement.totalDuration())
     expect(replacement.paused()).toBe(true)
     expect(replacement.play).not.toHaveBeenCalled()
+  })
+
+  it('keeps a longer completed replacement at its endpoint after SplitText restores time', () => {
+    setTimelineDurations(0.8, 1.4, 0)
+    const controller = createTextMotion(mountMarkup(chapter('01')))
+    const initial = timelineFor(0)
+    controller.playChapter('01')
+    initial.totalTime(initial.totalDuration() as number)
+    const onComplete = mocks.timelines[0].vars.onComplete as () => void
+    onComplete()
+
+    const replacement = mocks.splits[0].split.resplit() as TimelineMock
+
+    expect(initial.totalDuration()).toBe(0.8)
+    expect(replacement.totalDuration()).toBe(0.8)
+    expect(replacement.totalTime()).toBe(replacement.totalDuration())
+    expect(replacement.progress()).toBe(1)
+    expect(replacement.paused()).toBe(true)
+    expect(replacement.play).not.toHaveBeenCalled()
+  })
+
+  it('keeps a shorter completed replacement at its endpoint after SplitText restores time', () => {
+    setTimelineDurations(0.8, 0.4, 0)
+    const controller = createTextMotion(mountMarkup(chapter('01')))
+    const initial = timelineFor(0)
+    controller.playChapter('01')
+    initial.totalTime(initial.totalDuration() as number)
+    const onComplete = mocks.timelines[0].vars.onComplete as () => void
+    onComplete()
+
+    const replacement = mocks.splits[0].split.resplit() as TimelineMock
+
+    expect(initial.totalDuration()).toBe(0.8)
+    expect(replacement.totalDuration()).toBe(0.8)
+    expect(replacement.totalTime()).toBe(replacement.totalDuration())
+    expect(replacement.progress()).toBe(1)
+    expect(replacement.paused()).toBe(true)
+    expect(replacement.play).not.toHaveBeenCalled()
+  })
+
+  it('keeps repeated completed replacements complete and cleans up the latest one', () => {
+    setTimelineDurations(0.8, 1.4, 0, 0.4, 0)
+    const controller = createTextMotion(mountMarkup(chapter('01')))
+    const split = mocks.splits[0].split
+    const initial = timelineFor(0)
+    controller.playChapter('01')
+    initial.totalTime(initial.totalDuration() as number)
+    const onComplete = mocks.timelines[0].vars.onComplete as () => void
+    onComplete()
+
+    const firstReplacement = split.resplit() as TimelineMock
+    const latestReplacement = split.resplit() as TimelineMock
+    controller.revert()
+
+    expect(firstReplacement.progress()).toBe(1)
+    expect(latestReplacement.progress()).toBe(1)
+    expect(latestReplacement.kill).toHaveBeenCalledTimes(1)
+    expect(firstReplacement.kill).not.toHaveBeenCalled()
+    expect(initial.kill).not.toHaveBeenCalled()
   })
 
   it('does not create scramble tweens for whitespace-only non-hero targets', () => {

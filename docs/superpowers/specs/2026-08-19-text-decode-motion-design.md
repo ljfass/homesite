@@ -126,7 +126,7 @@ Title line splitting uses SplitText `autoSplit: true` with animations created th
 
 Only title lines are split. Body text and terminal commands are not split into character elements. This keeps DOM growth and resize work bounded.
 
-If a chapter has already completed its sequence, a responsive re-split must leave it at its completed visual state rather than replaying it.
+If a chapter has already completed its sequence, a responsive re-split must leave it at its completed visual state rather than replaying it. Record its completed absolute timeline time and, when changed line counts alter the replacement's natural duration, return a paused parent timeline whose local duration matches that recorded time. SplitText can then restore its saved absolute time while the replacement remains exactly at progress `1` for both longer and shorter line layouts.
 
 ## Accessibility
 
