@@ -118,6 +118,31 @@ async function expectChapterTextVisible(page: Page, chapter: string): Promise<vo
     .toBe(true)
 }
 
+async function expectChapterInViewport(page: Page, chapter: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.locator(`[data-chapter="${chapter}"]`).evaluate((section) => {
+          const rectangle = section.getBoundingClientRect()
+          return (
+            rectangle.right > 0 &&
+            rectangle.left < document.documentElement.clientWidth &&
+            rectangle.bottom > 0 &&
+            rectangle.top < window.innerHeight
+          )
+        }),
+      { timeout: 8_000 },
+    )
+    .toBe(true)
+}
+
+async function getTrackX(page: Page): Promise<number> {
+  return page.locator('[data-story-track]').evaluate((element) => {
+    const transform = getComputedStyle(element).transform
+    return transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m41
+  })
+}
+
 test('desktop renders the hero and drives the horizontal story from scroll', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'desktop-only behavior')
   await openHomepage(page)
@@ -185,6 +210,39 @@ test('desktop renders the hero and drives the horizontal story from scroll', asy
   await expect(ending).toBeVisible()
   await expect(ending).toBeInViewport({ ratio: 0.2 })
   await expectBackToTop(page)
+})
+
+test('desktop preserves horizontal progress through a runtime preference round trip', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'desktop-only behavior')
+  await openHomepage(page)
+  const stage = page.locator('[data-story-stage]')
+  const target = await stage.evaluate((storyStage) => {
+    const track = storyStage.querySelector<HTMLElement>('[data-story-track]')
+    const start = storyStage.getBoundingClientRect().top + window.scrollY
+    const travel = Math.max(0, (track?.scrollWidth ?? 0) - storyStage.clientWidth)
+    const progress = 0.55
+    return { top: start + travel * progress, trackX: -travel * progress }
+  })
+  await page.evaluate((top) => window.scrollTo({ top, behavior: 'instant' }), target.top)
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await expect
+    .poll(async () => Math.abs((await getTrackX(page)) - target.trackX), { timeout: 8_000 })
+    .toBeLessThan(4)
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expectVerticalFallback(page)
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await expectChapterInViewport(page, '03')
+
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await expect(page.locator('.pin-spacer')).toHaveCount(1)
+  await expect.poll(() => page.evaluate((top) => Math.abs(window.scrollY - top), target.top), { timeout: 8_000 }).toBeLessThan(4)
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await expectChapterInViewport(page, '03')
+  await expectChapterTextVisible(page, '03')
+  await expect
+    .poll(async () => Math.abs((await getTrackX(page)) - target.trackX), { timeout: 8_000 })
+    .toBeLessThan(4)
 })
 
 test('mobile keeps every chapter in a readable vertical flow', async ({ page }, testInfo) => {
@@ -268,6 +326,48 @@ test('mobile preserves the active chapter when runtime motion preferences change
 
   await expect(page.locator('.pin-spacer')).toHaveCount(0)
   await expectNoHorizontalOverflow(page)
+})
+
+test('reduced motion keeps semantic chapter tracking before text motion returns', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'mobile-only behavior')
+  await openHomepage(page)
+  const chapter03 = page.locator('[data-chapter="03"]')
+  const chapter04 = page.locator('[data-chapter="04"]')
+  await chapter03.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(page.locator('.text-motion-line')).toHaveCount(0)
+  await chapter04.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')
+  await expectChapterInViewport(page, '04')
+
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')
+  await expectChapterInViewport(page, '04')
+  await expectChapterTextVisible(page, '04')
+  await expect.poll(() => page.locator('.text-motion-line').count(), { timeout: 8_000 }).toBeGreaterThan(0)
+})
+
+test('responsive rebuilds retain chapter 03 across mobile and desktop layouts', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'mobile-only behavior')
+  await openHomepage(page)
+  const chapter = page.locator('[data-chapter="03"]')
+  await chapter.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await expectChapterTextVisible(page, '03')
+
+  await page.setViewportSize({ width: 1_440, height: 900 })
+  await expect(page.locator('.pin-spacer')).toHaveCount(1)
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await expectChapterInViewport(page, '03')
+  await expectChapterTextVisible(page, '03')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectVerticalFallback(page)
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await expectChapterInViewport(page, '03')
+  await expectChapterTextVisible(page, '03')
 })
 
 test('short landscape uses compact vertical layout without clipped content', async ({ page }, testInfo) => {

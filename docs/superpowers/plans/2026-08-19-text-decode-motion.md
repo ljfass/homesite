@@ -879,7 +879,11 @@ The separate no-preference context owns `textMotion.revert()`. Only its stable i
 
 ### Runtime Preference Changes
 
-Keep canonical reading state from actual desktop progress updates and compact chapter entries. While media contexts are stable, scroll events continuously refresh the current chapter's viewport offset and fallback scroll position; ignore teardown-generated scroll events once a match-media transition begins. Before GSAP reverts a match-media cycle, snapshot that state once, and suppress progress reporting, text playback, and the replacement controller's default chapter `00` while the cycle rebuilds. A native reduced-motion media-query listener schedules restoration only after GSAP finishes its post-match refresh. Restore the saved semantic anchor without smooth scrolling, resynchronize the header with the canonical progress/chapter, and make that saved chapter the newly active text controller's first playback. Cancel pending animation frames and remove native media, scroll, and GSAP event listeners on unmount.
+Keep canonical reading state from actual desktop progress updates and compact chapter entries. Record exact horizontal progress as part of the stable reading state; when entering reduced mode, keep the same lightweight non-pinning chapter triggers as compact mode so later vertical scrolling replaces that saved progress with the newly active semantic chapter. Cache the chapter element map once after assets settle and coalesce repeated anchor layout reads to one animation frame.
+
+While media contexts are stable, scroll events refresh the current chapter's viewport offset and fallback scroll position; ignore teardown-generated scroll events once a match-media transition begins. Before GSAP reverts a match-media cycle, force-flush the last pending anchor measurement and lock the first snapshot. Keep that snapshot through duplicate GSAP init/match cycles emitted by the same browser preference or breakpoint change, and suppress progress reporting, text playback, and the replacement controller's default chapter `00` while the cycle rebuilds. Native reduced-motion notification order must not prevent the GSAP init callback from force-flushing the snapshot.
+
+After the replacement context exists, refresh ScrollTrigger and resynchronize the layout. Restore desktop reading position from the replacement trigger's `start + savedProgress * (end - start)`; map vertical chapters to the midpoint of the equivalent horizontal chapter; restore compact/static layouts from the saved semantic anchor and viewport offset. Temporarily force the document scroll behavior to `auto` so desktop CSS smooth scrolling cannot emit intermediate chapter reports, then restore the previous inline style. Resynchronize the header and make the saved chapter the newly active text controller's first playback. Cancel pending animation frames and remove native media, scroll, and GSAP event listeners on unmount.
 
 - [ ] **Step 8: Verify orchestration and commit**
 
@@ -1055,6 +1059,8 @@ for (const chapter of ['00', '01', '02', '03', '04']) {
 Expected: reduced motion retains unsplit final DOM and no text animation wrappers.
 
 Add a mobile runtime-preference regression that scrolls chapter `03` into its reading area, continues scrolling within that chapter, toggles to reduced motion and back twice with `page.emulateMedia()`, and verifies each transition retains both the chapter's viewport offset and the `03 / 04` header. While reduced, assert no line masks and immediately visible final text; after motion returns, assert the original mask count is recreated without duplication and the active chapter settles to its final text. Retain no-pin, no-overflow, and runtime-error checks.
+
+Add three state-restoration regressions: a desktop preference round trip must return to the same ScrollTrigger progress and track transform; reduced mobile mode must track a scroll from chapter `03` to chapter `04` before recreating text motion; and a mobile-to-desktop-to-mobile breakpoint round trip must retain chapter `03` after each post-refresh rebuild.
 
 - [ ] **Step 5: Run focused browser scenarios**
 

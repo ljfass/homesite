@@ -1,6 +1,6 @@
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
 import { gsap, ScrollTrigger } from '../lib/gsap'
-import { getChapterFromProgress, getHorizontalTravel } from '../lib/motion'
+import { getChapterFromProgress, getHorizontalTravel, getMotionMode, type MotionMode } from '../lib/motion'
 import { createTextMotion, type TextMotionController } from '../lib/textMotion'
 
 type MotionUpdate = (progress: number, chapter: string) => void
@@ -8,9 +8,11 @@ type MotionUpdate = (progress: number, chapter: string) => void
 type ReadingState = {
   progress: number
   chapter: string
+  horizontalProgress?: number
 }
 
 type ReadingSnapshot = ReadingState & {
+  mode: MotionMode
   anchor?: HTMLElement
   anchorOffset: number
 }
@@ -81,6 +83,19 @@ function getMobileReadingState(chapter: string | undefined): ReadingState {
   return { progress: clamped / 4, chapter: String(clamped).padStart(2, '0') }
 }
 
+function clampProgress(progress: number): number {
+  return Math.min(Math.max(Number.isFinite(progress) ? progress : 0, 0), 1)
+}
+
+function getHorizontalProgressForChapter(chapter: string): number {
+  const chapterIndex = Number(chapter)
+  if (!Number.isFinite(chapterIndex) || chapterIndex <= 0) {
+    return 0
+  }
+
+  return clampProgress((Math.min(Math.round(chapterIndex), 4) - 0.5) / 4)
+}
+
 export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: MotionUpdate): void {
   let media: gsap.MatchMedia | undefined
   const matchMediaEvents = gsap as typeof gsap & MatchMediaEventSource
@@ -90,8 +105,8 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
   let matchMediaInitListener: (() => void) | undefined
   let matchMediaListener: (() => void) | undefined
   let scrollPositionListener: (() => void) | undefined
+  let readingPositionFrame: number | undefined
   let restorationFrame: number | undefined
-  let matchMediaTransitionFrame: number | undefined
   let restorationToken = 0
   let savedScrollY = 0
   let lastReadingState: ReadingState = { progress: 0, chapter: '00' }
@@ -108,11 +123,9 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       return
     }
 
-    savedScrollY = window.scrollY
-    lastReadingAnchor = scope.querySelector<HTMLElement>('[data-chapter="00"]') ?? undefined
-    lastReadingAnchorOffset = lastReadingAnchor?.getBoundingClientRect().top ?? 0
-    scrollPositionListener = () => {
-      if (matchMediaTransitionActive || preferenceRestorationPending) {
+    const chapterElements = new Map<string, HTMLElement>()
+    const captureReadingPosition = (force = false) => {
+      if (!force && (matchMediaTransitionActive || preferenceRestorationPending)) {
         return
       }
 
@@ -121,6 +134,26 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
         lastReadingAnchorOffset = lastReadingAnchor.getBoundingClientRect().top
       }
     }
+    const scheduleReadingPositionCapture = () => {
+      if (matchMediaTransitionActive || preferenceRestorationPending || readingPositionFrame !== undefined) {
+        return
+      }
+
+      readingPositionFrame = requestAnimationFrame(() => {
+        readingPositionFrame = undefined
+        captureReadingPosition()
+      })
+    }
+    const flushReadingPosition = () => {
+      if (readingPositionFrame !== undefined) {
+        cancelAnimationFrame(readingPositionFrame)
+        readingPositionFrame = undefined
+      }
+      captureReadingPosition(true)
+    }
+
+    savedScrollY = window.scrollY
+    scrollPositionListener = scheduleReadingPositionCapture
     window.addEventListener('scroll', scrollPositionListener, { passive: true })
 
     assetAbortController = new AbortController()
@@ -132,23 +165,45 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       return
     }
 
+    scope.querySelectorAll<HTMLElement>('[data-chapter]').forEach((chapterElement) => {
+      const chapter = chapterElement.dataset.chapter
+      if (chapter && !chapterElements.has(chapter)) {
+        chapterElements.set(chapter, chapterElement)
+      }
+    })
+    lastReadingAnchor = chapterElements.get('00')
+    captureReadingPosition()
+
     media = gsap.matchMedia()
     let textMotion: TextMotionController | undefined
-    const reportReadingState = (progress: number, chapter: string) => {
-      if (matchMediaTransitionActive || preferenceRestorationPending) {
+    let activeMotionMode: MotionMode = 'vertical'
+    let activeHorizontalTween: gsap.core.Tween | undefined
+    const reportReadingState = (progress: number, chapter: string, horizontalProgress?: number) => {
+      if (disposed || matchMediaTransitionActive || preferenceRestorationPending) {
         return
       }
 
-      lastReadingState = { progress, chapter }
-      const anchor = scope.querySelector<HTMLElement>(`[data-chapter="${chapter}"]`)
-      if (anchor) {
-        lastReadingAnchor = anchor
-        lastReadingAnchorOffset = anchor.getBoundingClientRect().top
+      const chapterChanged = lastReadingState.chapter !== chapter
+      lastReadingState = { progress, chapter, horizontalProgress }
+      if (chapterChanged) {
+        lastReadingAnchor = chapterElements.get(chapter)
+        scheduleReadingPositionCapture()
       }
       onMotionUpdate(progress, chapter)
       textMotion?.playChapter(chapter)
     }
+    const createReadingSnapshot = (): ReadingSnapshot => {
+      return {
+        progress: lastReadingState.progress,
+        chapter: lastReadingState.chapter,
+        horizontalProgress: lastReadingState.horizontalProgress,
+        mode: activeMotionMode,
+        anchor: lastReadingAnchor,
+        anchorOffset: lastReadingAnchorOffset,
+      }
+    }
     const scheduleReadingRestoration = () => {
+      preferenceRestorationPending = true
       const token = ++restorationToken
       if (restorationFrame !== undefined) {
         cancelAnimationFrame(restorationFrame)
@@ -161,24 +216,47 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
             return
           }
 
-          const snapshot = mediaChangeSnapshot ?? {
-            progress: lastReadingState.progress,
-            chapter: lastReadingState.chapter,
-            anchor: lastReadingAnchor,
-            anchorOffset: lastReadingAnchorOffset,
-          }
-          const anchorScrollY = snapshot.anchor?.isConnected
-            ? Math.max(0, snapshot.anchor.getBoundingClientRect().top + window.scrollY - snapshot.anchorOffset)
+          ScrollTrigger.refresh()
+          const snapshot = mediaChangeSnapshot ?? createReadingSnapshot()
+          const horizontalProgress =
+            snapshot.horizontalProgress ??
+            (snapshot.mode === 'horizontal'
+              ? clampProgress(snapshot.progress)
+              : getHorizontalProgressForChapter(snapshot.chapter))
+          const mobileReadingState = getMobileReadingState(snapshot.chapter)
+          const restoredReadingState: ReadingState =
+            activeMotionMode === 'horizontal' && snapshot.chapter !== '00'
+              ? { progress: horizontalProgress, chapter: snapshot.chapter, horizontalProgress }
+              : { ...mobileReadingState, horizontalProgress: snapshot.horizontalProgress }
+          const horizontalTrigger = activeHorizontalTween?.scrollTrigger
+          const horizontalTravel = horizontalTrigger ? horizontalTrigger.end - horizontalTrigger.start : 0
+          const restoredAnchor = chapterElements.get(restoredReadingState.chapter) ?? snapshot.anchor
+          const anchorScrollY = restoredAnchor?.isConnected
+            ? Math.max(0, restoredAnchor.getBoundingClientRect().top + window.scrollY - snapshot.anchorOffset)
             : savedScrollY
-          lastReadingState = { progress: snapshot.progress, chapter: snapshot.chapter }
-          lastReadingAnchor = snapshot.anchor
+          const restoredScrollY =
+            activeMotionMode === 'horizontal' && snapshot.chapter !== '00' && horizontalTrigger && horizontalTravel > 0
+              ? horizontalTrigger.start + horizontalProgress * horizontalTravel
+              : anchorScrollY
+          lastReadingState = restoredReadingState
+          lastReadingAnchor = restoredAnchor
           lastReadingAnchorOffset = snapshot.anchorOffset
-          window.scrollTo({ top: anchorScrollY, behavior: 'auto' })
+          savedScrollY = restoredScrollY
+          const documentStyle = document.documentElement.style
+          const previousScrollBehavior = documentStyle.scrollBehavior
+          documentStyle.scrollBehavior = 'auto'
+          try {
+            window.scrollTo({ top: restoredScrollY, behavior: 'auto' })
+          } finally {
+            documentStyle.scrollBehavior = previousScrollBehavior
+          }
           ScrollTrigger.update()
-          onMotionUpdate(snapshot.progress, snapshot.chapter)
-          textMotion?.playChapter(snapshot.chapter)
+          onMotionUpdate(restoredReadingState.progress, restoredReadingState.chapter)
+          textMotion?.playChapter(restoredReadingState.chapter)
+          matchMediaTransitionActive = false
           preferenceRestorationPending = false
           mediaChangeSnapshot = undefined
+          scheduleReadingPositionCapture()
         })
       })
     }
@@ -207,16 +285,16 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
         const desktop = conditions.desktop === true
         const mobile = conditions.mobile === true
         const reduceMotion = conditions.reduceMotion === true
-
-        if (reduceMotion) {
-          reportReadingState(0, '00')
-          return
-        }
+        activeMotionMode = getMotionMode({ desktop, reduced: reduceMotion })
 
         let cleanupHorizontal: (() => void) | undefined
         let signalTween: gsap.core.Tween | undefined
 
-        if (desktop) {
+        if (reduceMotion) {
+          reportReadingState(0, '00')
+        }
+
+        if (desktop && !reduceMotion) {
           const signal = scope.querySelector<HTMLElement>('[data-signal-visual]')
           signalTween = signal
             ? gsap.from(signal, { scale: 0.9, autoAlpha: 0, duration: 0.6, ease: 'power2.out' })
@@ -232,8 +310,12 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
             let resizeObserver: ResizeObserver | undefined
 
             const resetHorizontalTween = () => {
-              horizontalTween?.kill()
+              const tween = horizontalTween
+              tween?.kill()
               horizontalTween = undefined
+              if (activeHorizontalTween === tween) {
+                activeHorizontalTween = undefined
+              }
               gsap.set(track, { x: 0 })
               reportReadingState(0, '00')
             }
@@ -260,10 +342,11 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
                     anticipatePin: 1,
                     onUpdate: (self) => {
                       const chapter = getChapterFromProgress(self.progress)
-                      reportReadingState(self.progress, chapter)
+                      reportReadingState(self.progress, chapter, self.progress)
                     },
                   },
                 })
+                activeHorizontalTween = horizontalTween
               }
             }
 
@@ -297,10 +380,8 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
           }
         }
 
-        if (mobile) {
-          const chapters = scope.querySelectorAll<HTMLElement>('[data-chapter]')
-
-          chapters.forEach((section) => {
+        if (mobile || reduceMotion) {
+          chapterElements.forEach((section) => {
             const updateChapter = () => {
               const readingState = getMobileReadingState(section.dataset.chapter)
               reportReadingState(readingState.progress, readingState.chapter)
@@ -325,32 +406,20 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     )
     ScrollTrigger.refresh()
     matchMediaInitListener = () => {
-      if (!matchMediaTransitionActive) {
-        mediaChangeSnapshot = {
-          progress: lastReadingState.progress,
-          chapter: lastReadingState.chapter,
-          anchor: lastReadingAnchor,
-          anchorOffset: lastReadingAnchorOffset,
-        }
+      if (!mediaChangeSnapshot) {
+        flushReadingPosition()
+        mediaChangeSnapshot = createReadingSnapshot()
       }
       matchMediaTransitionActive = true
+      preferenceRestorationPending = true
     }
     matchMediaListener = () => {
-      if (matchMediaTransitionFrame !== undefined) {
-        cancelAnimationFrame(matchMediaTransitionFrame)
-      }
-      matchMediaTransitionFrame = requestAnimationFrame(() => {
-        matchMediaTransitionFrame = undefined
-        matchMediaTransitionActive = false
-      })
+      scheduleReadingRestoration()
     }
     matchMediaEvents.addEventListener('matchMediaInit', matchMediaInitListener)
     matchMediaEvents.addEventListener('matchMedia', matchMediaListener)
     reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)')
-    reducedMotionListener = () => {
-      preferenceRestorationPending = true
-      scheduleReadingRestoration()
-    }
+    reducedMotionListener = scheduleReadingRestoration
     reducedMotionMedia.addEventListener('change', reducedMotionListener)
   })
 
@@ -358,11 +427,11 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
     disposed = true
     assetAbortController?.abort()
     restorationToken += 1
+    if (readingPositionFrame !== undefined) {
+      cancelAnimationFrame(readingPositionFrame)
+    }
     if (restorationFrame !== undefined) {
       cancelAnimationFrame(restorationFrame)
-    }
-    if (matchMediaTransitionFrame !== undefined) {
-      cancelAnimationFrame(matchMediaTransitionFrame)
     }
     if (scrollPositionListener) {
       window.removeEventListener('scroll', scrollPositionListener)

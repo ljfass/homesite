@@ -244,6 +244,77 @@ function emitGsapMatchMedia(): void {
   mocks.matchMediaListener?.()
 }
 
+function runMatchMediaCycle(nextConditions: Record<string, boolean>): void {
+  const reducedMotionChanged = mocks.conditions.reduceMotion !== nextConditions.reduceMotion
+  emitGsapMatchMediaInit()
+
+  if (reducedMotionChanged) {
+    deactivateTextContext()
+  }
+
+  const responsiveIndex = mocks.mediaCleanups.findIndex(({ queries }) => typeof queries === 'object')
+  if (responsiveIndex >= 0) {
+    const [{ cleanup }] = mocks.mediaCleanups.splice(responsiveIndex, 1)
+    cleanup()
+  }
+
+  mocks.conditions = nextConditions
+  if (reducedMotionChanged && !nextConditions.reduceMotion) {
+    activateTextContext()
+  }
+  activateResponsiveContext()
+  emitGsapMatchMedia()
+
+  if (reducedMotionChanged) {
+    emitReducedMotionChange(nextConditions.reduceMotion)
+  }
+}
+
+function runNoopMatchMediaCycle(): void {
+  emitGsapMatchMediaInit()
+  emitGsapMatchMedia()
+}
+
+function stubAnimationFrames(): {
+  cancelFrame: ReturnType<typeof vi.fn>
+  pending: () => number
+  runAll: () => void
+  runNext: () => void
+} {
+  const frames = new Map<number, FrameRequestCallback>()
+  let frameId = 0
+  const cancelFrame = vi.fn((id: number) => frames.delete(id))
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frameId += 1
+    frames.set(frameId, callback)
+    return frameId
+  })
+  vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+
+  const runNext = () => {
+    const next = [...frames.entries()].sort(([left], [right]) => left - right)[0]
+    expect(next).toBeDefined()
+    if (!next) return
+    const [id, callback] = next
+    frames.delete(id)
+    callback(0)
+  }
+
+  return {
+    cancelFrame,
+    pending: () => frames.size,
+    runAll: () => {
+      let remaining = 20
+      while (frames.size > 0 && remaining > 0) {
+        runNext()
+        remaining -= 1
+      }
+      expect(frames.size).toBe(0)
+    },
+    runNext,
+  }
+}
+
 function mountHarness(
   options: { image?: boolean; story?: boolean; signal?: boolean } = {},
 ): { reports: MotionReport[]; wrapper: VueWrapper } {
@@ -282,6 +353,7 @@ afterEach(() => {
   restoreProperty(window, 'matchMedia', originalMatchMedia)
   restoreProperty(HTMLImageElement.prototype, 'complete', originalImageComplete)
   restoreProperty(HTMLImageElement.prototype, 'decode', originalImageDecode)
+  document.documentElement.style.removeProperty('scroll-behavior')
 })
 
 describe('useHomeMotion', () => {
@@ -297,7 +369,17 @@ describe('useHomeMotion', () => {
     expect(mocks.gsap.to).not.toHaveBeenCalled()
     expect(mocks.gsap.from).not.toHaveBeenCalled()
     expect(mocks.ScrollTrigger.batch).not.toHaveBeenCalled()
-    expect(mocks.ScrollTrigger.create).not.toHaveBeenCalled()
+    expect(mocks.ScrollTrigger.create).toHaveBeenCalledTimes(5)
+    expect(
+      mocks.ScrollTrigger.create.mock.calls.every(
+        ([config]) =>
+          config.start === 'top 55%' &&
+          config.end === 'bottom 45%' &&
+          !('pin' in config) &&
+          !('scrub' in config) &&
+          !('animation' in config),
+      ),
+    ).toBe(true)
     expect(mocks.createTextMotion).not.toHaveBeenCalled()
     expect(mocks.textMotion.playChapter).not.toHaveBeenCalled()
     expect(mocks.textMotion.revert).not.toHaveBeenCalled()
@@ -360,24 +442,7 @@ describe('useHomeMotion', () => {
   it('restores the latest stable compact viewport offset after native preference changes settle', async () => {
     configureGsap({ desktop: false, mobile: true, reduceMotion: false })
     setFontsReady(Promise.resolve())
-    const frames = new Map<number, FrameRequestCallback>()
-    let frameId = 0
-    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
-      frameId += 1
-      frames.set(frameId, callback)
-      return frameId
-    })
-    const cancelFrame = vi.fn((id: number) => frames.delete(id))
-    const runNextFrame = () => {
-      const next = [...frames.entries()].sort(([left], [right]) => left - right)[0]
-      expect(next).toBeDefined()
-      if (!next) return
-      const [id, callback] = next
-      frames.delete(id)
-      callback(0)
-    }
-    vi.stubGlobal('requestAnimationFrame', requestFrame)
-    vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+    const frames = stubAnimationFrames()
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 640, writable: true })
 
@@ -395,22 +460,13 @@ describe('useHomeMotion', () => {
     window.scrollY = 820
     window.dispatchEvent(new Event('scroll'))
 
-    emitGsapMatchMediaInit()
-    mocks.ScrollTrigger.create.mock.calls[0][0].onEnter()
-    emitGsapMatchMediaInit()
-    mocks.ScrollTrigger.create.mock.calls[2][0].onEnter()
-    deactivateTextContext()
+    emitReducedMotionChange(true)
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
     anchorTop = 760
     window.scrollY = 0
     window.dispatchEvent(new Event('scroll'))
-    emitGsapMatchMedia()
-    emitReducedMotionChange(true)
     expect(scrollTo).not.toHaveBeenCalled()
-    expect(requestFrame).toHaveBeenCalledTimes(2)
-    runNextFrame()
-    runNextFrame()
-    expect(scrollTo).not.toHaveBeenCalled()
-    runNextFrame()
+    frames.runAll()
     expect(scrollTo).toHaveBeenCalledWith({ top: 820, behavior: 'auto' })
     expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
 
@@ -476,6 +532,146 @@ describe('useHomeMotion', () => {
     expect(mocks.reducedMotionMedia.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
     expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMediaInit', expect.any(Function))
     expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMedia', expect.any(Function))
+  })
+
+  it('restores exact desktop ScrollTrigger progress after a preference round trip', async () => {
+    configureGsap({ desktop: true, mobile: false, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = stubAnimationFrames()
+    const scrollBehaviors: string[] = []
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {
+      scrollBehaviors.push(document.documentElement.style.scrollBehavior)
+    })
+    document.documentElement.style.scrollBehavior = 'smooth'
+    const firstController = { playChapter: vi.fn(), revert: vi.fn() }
+    const replacementController = { playChapter: vi.fn(), revert: vi.fn() }
+    mocks.createTextMotion.mockReset().mockReturnValueOnce(firstController).mockReturnValueOnce(replacementController)
+    const firstTween = {
+      kill: vi.fn(),
+      // ScrollTrigger's public progress can briefly reset before the global
+      // match-media init listener runs; the last onUpdate report is stable.
+      scrollTrigger: { start: 1_000, end: 1_600, progress: 0 },
+    }
+    const replacementTween = {
+      kill: vi.fn(),
+      scrollTrigger: { start: 1_200, end: 1_800, progress: 0 },
+    }
+    mocks.gsap.to.mockReturnValueOnce(firstTween).mockReturnValueOnce(replacementTween)
+
+    const { reports, wrapper } = mountHarness({ story: true })
+    const stage = wrapper.get('[data-story-stage]').element
+    const track = wrapper.get('[data-story-track]').element
+    Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1_000 })
+    Object.defineProperty(track, 'scrollWidth', { configurable: true, value: 1_600 })
+    await settle()
+    mocks.gsap.to.mock.calls[0][1].scrollTrigger.onUpdate({ progress: 0.55 })
+
+    runMatchMediaCycle({ desktop: true, mobile: false, reduceMotion: true })
+    frames.runNext()
+    runNoopMatchMediaCycle()
+    frames.runAll()
+    runMatchMediaCycle({ desktop: true, mobile: false, reduceMotion: false })
+    frames.runNext()
+    runNoopMatchMediaCycle()
+    frames.runAll()
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1_530, behavior: 'auto' })
+    expect(scrollBehaviors.at(-1)).toBe('auto')
+    expect(document.documentElement.style.scrollBehavior).toBe('smooth')
+    expect(reports.at(-1)).toEqual({ progress: 0.55, chapter: '03' })
+    expect(replacementController.playChapter).toHaveBeenCalledExactlyOnceWith('03')
+    wrapper.unmount()
+  })
+
+  it('tracks semantic chapters while reduced and restores the latest chapter to text motion', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = stubAnimationFrames()
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    const firstController = { playChapter: vi.fn(), revert: vi.fn() }
+    const replacementController = { playChapter: vi.fn(), revert: vi.fn() }
+    mocks.createTextMotion.mockReset().mockReturnValueOnce(firstController).mockReturnValueOnce(replacementController)
+
+    const { reports, wrapper } = mountHarness()
+    await settle()
+    mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
+    frames.runAll()
+    expect(mocks.ScrollTrigger.create).toHaveBeenCalledTimes(10)
+    mocks.ScrollTrigger.create.mock.calls[9][0].onEnter()
+    expect(reports.at(-1)).toEqual({ progress: 1, chapter: '04' })
+
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: false })
+    frames.runAll()
+    expect(replacementController.playChapter).toHaveBeenCalledExactlyOnceWith('04')
+    expect(reports.at(-1)).toEqual({ progress: 1, chapter: '04' })
+    wrapper.unmount()
+  })
+
+  it('resynchronizes chapter 03 across mobile and desktop match-media rebuilds', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = stubAnimationFrames()
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    const desktopTween = {
+      kill: vi.fn(),
+      scrollTrigger: { start: 1_000, end: 1_600, progress: 0 },
+    }
+    mocks.gsap.to.mockReturnValueOnce(desktopTween)
+
+    const { reports, wrapper } = mountHarness({ story: true })
+    const stage = wrapper.get('[data-story-stage]').element
+    const track = wrapper.get('[data-story-track]').element
+    Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1_000 })
+    Object.defineProperty(track, 'scrollWidth', { configurable: true, value: 1_600 })
+    await settle()
+    mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+
+    runMatchMediaCycle({ desktop: true, mobile: false, reduceMotion: false })
+    frames.runNext()
+    runNoopMatchMediaCycle()
+    frames.runAll()
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1_375, behavior: 'auto' })
+    expect(reports.at(-1)).toEqual({ progress: 0.625, chapter: '03' })
+
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: false })
+    frames.runAll()
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+    expect(scrollTo).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('caches chapter elements and throttles repeated desktop anchor sampling', async () => {
+    configureGsap({ desktop: true, mobile: false, reduceMotion: false })
+    const fonts = deferred<void>()
+    setFontsReady(fonts.promise)
+    const frames = stubAnimationFrames()
+
+    const { wrapper } = mountHarness({ story: true })
+    const queryChapters = vi.spyOn(wrapper.element, 'querySelectorAll')
+    const chapter = wrapper.get('[data-chapter="03"]').element
+    const readChapterRect = vi.spyOn(chapter, 'getBoundingClientRect')
+    const stage = wrapper.get('[data-story-stage]').element
+    const track = wrapper.get('[data-story-track]').element
+    Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 1_000 })
+    Object.defineProperty(track, 'scrollWidth', { configurable: true, value: 1_600 })
+    fonts.resolve()
+    await settle()
+
+    const onUpdate = mocks.gsap.to.mock.calls[0][1].scrollTrigger.onUpdate
+    onUpdate({ progress: 0.51 })
+    onUpdate({ progress: 0.55 })
+    onUpdate({ progress: 0.6 })
+    window.dispatchEvent(new Event('scroll'))
+    window.dispatchEvent(new Event('scroll'))
+
+    expect(queryChapters.mock.calls.filter(([selector]) => selector === '[data-chapter]')).toHaveLength(1)
+    expect(readChapterRect).not.toHaveBeenCalled()
+    expect(frames.pending()).toBe(1)
+    frames.runNext()
+    expect(readChapterRect).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('cancels stale preference restoration frames and listeners on unmount', async () => {
