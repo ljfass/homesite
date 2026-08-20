@@ -56,7 +56,7 @@ When `prefers-reduced-motion: reduce` is active:
 - Do not hide or translate text before display.
 - Render all final text immediately and preserve the existing vertical story fallback.
 
-When this preference changes while the page is open, preserve the reader's canonical chapter and viewport position. Stable scroll events keep the active chapter's viewport offset current, while teardown-generated scroll events are ignored after a match-media transition begins. Let GSAP finish rebuilding its media contexts, then restore the saved semantic anchor without smooth scrolling, resynchronize header progress, and play the newly active text controller for that chapter. A reduced-motion placeholder, cleanup report, or trigger emitted while contexts are rebuilding must not update the header or drive text playback.
+When this preference changes while the page is open, preserve the reader's canonical chapter and viewport position. Stable scroll events keep the active chapter's viewport offset current, while teardown-generated scroll events are ignored after a match-media transition begins. Let GSAP finish rebuilding its media contexts, then restore the saved semantic anchor without smooth scrolling, resynchronize header progress, and make the saved chapter the newly active text controller's first playback. A default chapter `00`, reduced-motion placeholder, cleanup report, or trigger emitted while contexts are rebuilding must not update the header or drive text playback.
 
 ## Motion Values
 
@@ -100,7 +100,7 @@ The module does not own Vue lifecycle hooks or ScrollTrigger positioning.
 `src/composables/useHomeMotion.ts` remains the owner of page lifecycle, media conditions, and scroll behavior. It will:
 
 - Create the text-motion module after fonts and root images settle.
-- Play chapter `00` after initialization.
+- Play chapter `00` only after stable initial initialization; a controller recreated during runtime preference restoration waits for the saved canonical chapter.
 - Invoke `playChapter()` when its existing desktop progress logic reaches a new chapter.
 - Invoke `playChapter()` from the existing compact chapter triggers.
 - Avoid creating the text-motion module inside the reduced-motion branch.

@@ -801,7 +801,9 @@ media.add(
   '(prefers-reduced-motion: no-preference)',
   () => {
     textMotion = createTextMotion(scope)
-    textMotion.playChapter('00')
+    if (!matchMediaTransitionActive && !preferenceRestorationPending) {
+      textMotion.playChapter('00')
+    }
 
     return () => {
       textMotion?.revert()
@@ -873,11 +875,11 @@ return () => {
 }
 ```
 
-The separate no-preference context owns `textMotion.revert()`. Keep component unmount as `media?.revert()`; it invokes both scoped cleanups. Do not call `ScrollTrigger.killAll()`.
+The separate no-preference context owns `textMotion.revert()`. Only its stable initial activation plays chapter `00`; a controller recreated during a runtime preference transition remains idle until canonical-state restoration plays the saved chapter. Keep component unmount as `media?.revert()`; it invokes both scoped cleanups. Do not call `ScrollTrigger.killAll()`.
 
 ### Runtime Preference Changes
 
-Keep canonical reading state from actual desktop progress updates and compact chapter entries. While media contexts are stable, scroll events continuously refresh the current chapter's viewport offset and fallback scroll position; ignore teardown-generated scroll events once a match-media transition begins. Before GSAP reverts a match-media cycle, snapshot that state once, and suppress both progress reporting and text playback from synthetic cleanup or trigger callbacks while the cycle rebuilds. A native reduced-motion media-query listener schedules restoration only after GSAP finishes its post-match refresh. Restore the saved semantic anchor without smooth scrolling, resynchronize the header with the canonical progress/chapter, and invoke the newly active text controller for that chapter. Cancel pending animation frames and remove native media, scroll, and GSAP event listeners on unmount.
+Keep canonical reading state from actual desktop progress updates and compact chapter entries. While media contexts are stable, scroll events continuously refresh the current chapter's viewport offset and fallback scroll position; ignore teardown-generated scroll events once a match-media transition begins. Before GSAP reverts a match-media cycle, snapshot that state once, and suppress progress reporting, text playback, and the replacement controller's default chapter `00` while the cycle rebuilds. A native reduced-motion media-query listener schedules restoration only after GSAP finishes its post-match refresh. Restore the saved semantic anchor without smooth scrolling, resynchronize the header with the canonical progress/chapter, and make that saved chapter the newly active text controller's first playback. Cancel pending animation frames and remove native media, scroll, and GSAP event listeners on unmount.
 
 - [ ] **Step 8: Verify orchestration and commit**
 

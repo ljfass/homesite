@@ -186,7 +186,9 @@ export function useHomeMotion(root: Ref<HTMLElement | null>, onMotionUpdate: Mot
       '(prefers-reduced-motion: no-preference)',
       () => {
         textMotion = createTextMotion(scope)
-        textMotion.playChapter('00')
+        if (!matchMediaTransitionActive && !preferenceRestorationPending) {
+          textMotion.playChapter('00')
+        }
         return () => {
           textMotion?.revert()
           textMotion = undefined

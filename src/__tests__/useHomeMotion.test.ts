@@ -465,14 +465,12 @@ describe('useHomeMotion', () => {
     activateResponsiveContext()
     const replacementChapter = mocks.ScrollTrigger.create.mock.calls.at(-4)?.[0]
     replacementChapter?.onEnter()
-    expect(replacementTextMotion.playChapter).toHaveBeenCalledTimes(1)
-    expect(replacementTextMotion.playChapter).toHaveBeenLastCalledWith('00')
+    expect(replacementTextMotion.playChapter).not.toHaveBeenCalled()
     emitGsapMatchMedia()
     runNextFrame()
     runNextFrame()
     runNextFrame()
-    expect(replacementTextMotion.playChapter).toHaveBeenCalledTimes(2)
-    expect(replacementTextMotion.playChapter).toHaveBeenLastCalledWith('03')
+    expect(replacementTextMotion.playChapter).toHaveBeenCalledExactlyOnceWith('03')
 
     wrapper.unmount()
     expect(mocks.reducedMotionMedia.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
