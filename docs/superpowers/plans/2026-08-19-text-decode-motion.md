@@ -889,19 +889,23 @@ After the replacement context exists, refresh ScrollTrigger and resynchronize th
 
 #### Guarded user scroll intent
 
-The guarded rebuild must preserve a reader who moves after the replacement layout appears but before the two-frame restoration finishes. Add capture-phase passive `wheel` and `touchmove` listeners plus a capture-phase `keydown` listener for `ArrowUp`, `ArrowDown`, `PageUp`, `PageDown`, `Home`, `End`, and Space. Capture phase lets the intent latch run before ScrollTrigger's earlier window listener synchronously reports from the same wheel event. These listeners only latch intent while `matchMediaTransitionActive || preferenceRestorationPending`; ordinary `scroll` events do not latch intent because ScrollTrigger teardown and programmatic restoration also emit them.
+The guarded rebuild must preserve a reader who moves after the replacement layout appears but before the two-frame restoration finishes. Add capture-phase passive `wheel` and `touchmove` listeners plus a capture-phase `keydown` listener for `ArrowUp`, `ArrowDown`, `PageUp`, `PageDown`, `Home`, `End`, and Space. Capture phase lets the intent listener run before ScrollTrigger's earlier window listener synchronously reports from the same wheel event. Ignore keyboard events that are default-prevented, composing, or originate within an input, textarea, select, or contenteditable ancestor.
 
-While guarded, `reportReadingState()` must still reject disposed, stale-generation, and live-media-mismatched callbacks. When the callback belongs to the current live responsive context and user intent is latched, cache a `pendingUserSnapshot` from its semantic state, current anchor offset, layout mode, and `window.scrollY`, but do not call `onMotionUpdate()` or `textMotion.playChapter()`. Restoration uses:
+Each accepted input creates a monotonically increasing token bound to the current responsive generation. While guarded, `reportReadingState()` must still reject disposed, stale-generation, and live-media-mismatched callbacks. A current trigger may create or refine `pendingUserSnapshot` only for the matching input token and generation; a later generation clears the active intent but retains the confirmed snapshot. This prevents its placeholder `00`, initialization update, or refresh report from overwriting an earlier user-confirmed chapter. Do not call `onMotionUpdate()` or `textMotion.playChapter()` while caching. Restoration uses:
 
 ```ts
-const snapshot = pendingUserSnapshot ?? mediaChangeSnapshot ?? lastStableSnapshot ?? createReadingSnapshot()
+const snapshot = pendingUserSnapshot?.snapshot ?? mediaChangeSnapshot ?? lastStableSnapshot ?? createReadingSnapshot()
 ```
 
-The winning restoration token freezes the intent latch immediately before `ScrollTrigger.refresh()` while retaining the cached pending snapshot; refresh-generated reports therefore cannot overwrite user input. Clear the pending snapshot when that token unlocks, and clear both snapshot and intent on unmount. Duplicate media cycles retain the pending snapshot; superseded restoration frames cannot publish or clear it.
+If a real input scrolls within the current chapter without firing a semantic trigger, the guarded scroll listener schedules one position-capture frame. That frame updates the same intent token from its pending snapshot or the locked canonical state, reads the current canonical anchor offset once, and records the actual `window.scrollY`. Repeated scroll events must not create additional frames. Scroll events with no valid input token remain ignored.
+
+The winning restoration token clears active intent immediately before `ScrollTrigger.refresh()` while retaining the cached pending snapshot; refresh-generated reports therefore cannot overwrite user input. Clear the pending snapshot when that token unlocks, and clear both snapshot and intent on unmount. Duplicate and overlapping media cycles retain the pending snapshot; superseded restoration frames cannot publish or clear it.
 
 Add a deterministic unit regression that enters the guarded reduced-motion replacement context on chapter `03`, dispatches wheel intent, invokes its live chapter `04` trigger before either restoration frame runs, and verifies that header/text remain suppressed until restoration finishes and then publish chapter `04`. Also invoke an old-generation trigger and a guarded scroll without input to prove neither can replace the pending or locked snapshot. Run the new unit alone before production edits and expect it to fail with the final report/playback still on `03`.
 
 In Chromium mobile, remove timing dependence from the semantic regression by issuing a real `page.mouse.wheel()` immediately after the reduced-motion wrappers disappear and polling until chapter `04` reaches the reading position. Do not wait for two animation frames before scrolling. The final header, viewport chapter, and recreated text controller must settle on `04`.
+
+Add two held-frame Chromium regressions. First, after the guarded wheel reaches chapter `04`, change the viewport to create another responsive generation before releasing restoration frames; the later generation must not replace `04` with placeholder `00`. Second, issue an approximately `100px` wheel inside chapter `03` without leaving the chapter and verify that release preserves both `window.scrollY` and the chapter's viewport top within the existing tolerance.
 
 - [ ] **Step 8: Verify orchestration and commit**
 

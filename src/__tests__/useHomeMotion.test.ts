@@ -702,6 +702,109 @@ describe('useHomeMotion', () => {
     wrapper.unmount()
   })
 
+  it('retains a confirmed user chapter across an overlapping responsive generation', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = stubAnimationFrames()
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((optionsOrX) => {
+      const { top } = optionsOrX as unknown as ScrollToOptions
+      window.scrollY = top ?? window.scrollY
+    })
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 2_000, writable: true })
+
+    const { reports, wrapper } = mountHarness()
+    await settle()
+    mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+    frames.runAll()
+
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
+    const reducedChapter04 = mocks.ScrollTrigger.create.mock.calls[9][0]
+    vi.spyOn(reducedChapter04.trigger, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ y: 120 }))
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: 800 }))
+    window.scrollY = 3_400
+    reducedChapter04.onEnter()
+
+    runMatchMediaCycle({ desktop: true, mobile: false, reduceMotion: true })
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+    frames.runAll()
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 3_400, behavior: 'auto' })
+    expect(reports.at(-1)).toEqual({ progress: 1, chapter: '04' })
+    wrapper.unmount()
+  })
+
+  it('retains same-chapter user scroll offset without a guarded chapter report', async () => {
+    configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+    setFontsReady(Promise.resolve())
+    const frames = stubAnimationFrames()
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((optionsOrX) => {
+      const { top } = optionsOrX as unknown as ScrollToOptions
+      window.scrollY = top ?? window.scrollY
+    })
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 2_000, writable: true })
+
+    const { reports, wrapper } = mountHarness()
+    await settle()
+    const chapter03 = mocks.ScrollTrigger.create.mock.calls[3][0]
+    vi.spyOn(chapter03.trigger, 'getBoundingClientRect').mockImplementation(() =>
+      DOMRect.fromRect({ y: 2_120 - window.scrollY }),
+    )
+    chapter03.onEnter()
+    window.dispatchEvent(new Event('scroll'))
+    frames.runAll()
+
+    runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }))
+    window.scrollY = 2_100
+    window.dispatchEvent(new Event('scroll'))
+    window.dispatchEvent(new Event('scroll'))
+    expect(frames.pending()).toBe(2)
+    frames.runAll()
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 2_100, behavior: 'auto' })
+    expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+    wrapper.unmount()
+  })
+
+  it.each(['prevented', 'composing', 'input', 'textarea', 'select', 'contenteditable'] as const)(
+    'ignores %s keyboard events during restoration',
+    async (eventSource) => {
+      configureGsap({ desktop: false, mobile: true, reduceMotion: false })
+      setFontsReady(Promise.resolve())
+      const frames = stubAnimationFrames()
+      vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+
+      const { reports, wrapper } = mountHarness()
+      await settle()
+      mocks.ScrollTrigger.create.mock.calls[3][0].onEnter()
+      frames.runAll()
+      runMatchMediaCycle({ desktop: false, mobile: true, reduceMotion: true })
+      const reducedChapter04 = mocks.ScrollTrigger.create.mock.calls[9][0]
+
+      if (eventSource === 'prevented') {
+        const prevented = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })
+        prevented.preventDefault()
+        window.dispatchEvent(prevented)
+      } else if (eventSource === 'composing') {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, isComposing: true }))
+      } else {
+        const editable = document.createElement(eventSource === 'contenteditable' ? 'div' : eventSource)
+        const target = eventSource === 'contenteditable' ? document.createElement('span') : editable
+        if (eventSource === 'contenteditable') {
+          editable.setAttribute('contenteditable', 'true')
+          editable.append(target)
+        }
+        wrapper.element.append(editable)
+        target.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+      }
+      reducedChapter04.onEnter()
+      frames.runAll()
+
+      expect(reports.at(-1)).toEqual({ progress: 0.75, chapter: '03' })
+      wrapper.unmount()
+    },
+  )
+
   it('resynchronizes chapter 03 across mobile and desktop match-media rebuilds', async () => {
     configureGsap({ desktop: false, mobile: true, reduceMotion: false })
     setFontsReady(Promise.resolve())
@@ -802,6 +905,7 @@ describe('useHomeMotion', () => {
     const cancelFrame = vi.fn((id: number) => frames.delete(id))
     vi.stubGlobal('requestAnimationFrame', requestFrame)
     vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+    const addWindowListener = vi.spyOn(window, 'addEventListener')
     const removeWindowListener = vi.spyOn(window, 'removeEventListener')
 
     const { wrapper } = mountHarness()
@@ -816,9 +920,21 @@ describe('useHomeMotion', () => {
     expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMediaInit', expect.any(Function))
     expect(mocks.gsap.removeEventListener).toHaveBeenCalledWith('matchMedia', expect.any(Function))
     expect(mocks.reducedMotionListeners).toEqual(new Set())
-    expect(removeWindowListener).toHaveBeenCalledWith('wheel', expect.any(Function), true)
-    expect(removeWindowListener).toHaveBeenCalledWith('touchmove', expect.any(Function), true)
-    expect(removeWindowListener).toHaveBeenCalledWith('keydown', expect.any(Function), true)
+    const wheelListener = addWindowListener.mock.calls.find(
+      ([event, , options]) => event === 'wheel' && typeof options === 'object' && options.capture,
+    )?.[1]
+    const touchListener = addWindowListener.mock.calls.find(
+      ([event, , options]) => event === 'touchmove' && typeof options === 'object' && options.capture,
+    )?.[1]
+    const keyListener = addWindowListener.mock.calls.find(
+      ([event, , options]) => event === 'keydown' && options === true,
+    )?.[1]
+    expect(wheelListener).toEqual(expect.any(Function))
+    expect(touchListener).toEqual(expect.any(Function))
+    expect(keyListener).toEqual(expect.any(Function))
+    expect(removeWindowListener).toHaveBeenCalledWith('wheel', wheelListener, true)
+    expect(removeWindowListener).toHaveBeenCalledWith('touchmove', touchListener, true)
+    expect(removeWindowListener).toHaveBeenCalledWith('keydown', keyListener, true)
   })
 
   it('keeps text playback alive across responsive cleanup and reverts it only with the media context', async () => {

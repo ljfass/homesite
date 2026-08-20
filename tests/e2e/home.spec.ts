@@ -425,6 +425,70 @@ test('reduced motion keeps semantic chapter tracking before text motion returns'
   await expect.poll(() => page.locator('.text-motion-line').count(), { timeout: 8_000 }).toBeGreaterThan(0)
 })
 
+test('overlapping responsive rebuild retains the guarded user chapter', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'mobile-only behavior')
+  await openHomepage(page)
+  const chapter03 = page.locator('[data-chapter="03"]')
+  const chapter04 = page.locator('[data-chapter="04"]')
+  await chapter03.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+
+  await holdAnimationFrames(page)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(page.locator('.text-motion-line')).toHaveCount(0)
+  const deltaToChapter04 = await chapter04.evaluate(
+    (section) => section.getBoundingClientRect().top - window.innerHeight * 0.5,
+  )
+  await page.mouse.move(195, 422)
+  await page.mouse.wheel(0, Math.max(1, deltaToChapter04))
+  await expectChapterInViewport(page, '04')
+  await page.setViewportSize({ width: 1_440, height: 900 })
+  await expectVerticalFallback(page)
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+
+  await releaseAnimationFrames(page)
+  await expect(page.locator('.site-header__chapter')).toHaveText('04 / 04')
+  await expectChapterInViewport(page, '04')
+})
+
+test('guarded same-chapter wheel retains the latest compact offset', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'mobile-only behavior')
+  await openHomepage(page)
+  const chapter03 = page.locator('[data-chapter="03"]')
+  await chapter03.evaluate((section) => section.scrollIntoView({ block: 'center' }))
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+  await waitForAnimationFrames(page)
+
+  await holdAnimationFrames(page)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(page.locator('.text-motion-line')).toHaveCount(0)
+  const beforeScrollY = await page.evaluate(() => window.scrollY)
+  await page.mouse.move(195, 422)
+  await page.mouse.wheel(0, 100)
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 8_000 }).toBeGreaterThan(beforeScrollY + 70)
+  const userPosition = await chapter03.evaluate((section) => ({
+    scrollY: window.scrollY,
+    chapterTop: section.getBoundingClientRect().top,
+  }))
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+
+  await releaseAnimationFrames(page)
+  await expect
+    .poll(
+      () =>
+        chapter03.evaluate(
+          (section, baseline) => ({
+            scrollDelta: Math.abs(window.scrollY - baseline.scrollY),
+            chapterDelta: Math.abs(section.getBoundingClientRect().top - baseline.chapterTop),
+          }),
+          userPosition,
+        ),
+      { timeout: 8_000 },
+    )
+    .toEqual({ scrollDelta: 0, chapterDelta: 0 })
+  await expect(page.locator('.site-header__chapter')).toHaveText('03 / 04')
+})
+
 test('responsive rebuilds retain chapter 03 across mobile and desktop layouts', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile', 'mobile-only behavior')
   await openHomepage(page)
