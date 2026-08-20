@@ -210,6 +210,10 @@ a[href] {
   letter-spacing: 0;
 }
 
+.text-motion-line-mask {
+  overflow: clip;
+}
+
 .hero__title {
   color: var(--color-text);
   font-size: 3.5rem;
@@ -565,6 +569,11 @@ a[href] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .text-motion-line {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
   *,
   *::before,
   *::after {

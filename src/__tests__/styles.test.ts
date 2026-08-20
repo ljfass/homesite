@@ -40,6 +40,16 @@ describe('homepage visual system', () => {
     )
   })
 
+  it('clips animated text lines inside their reveal masks', () => {
+    expect(globalStyles).toMatch(/\.text-motion-line-mask\s*{[^}]*overflow: clip;/s)
+  })
+
+  it('keeps animated text lines visible and unshifted with reduced motion', () => {
+    expect(globalStyles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)\s*{[\s\S]*?\.text-motion-line\s*{[^}]*opacity: 1 !important;[^}]*transform: none !important;/,
+    )
+  })
+
   it('keeps desktop story chapters narrower than the viewport', () => {
     expect(globalStyles).toContain('width: min(82vw, 1080px);')
     expect(globalStyles).toContain('flex: 0 0 min(82vw, 1080px);')
